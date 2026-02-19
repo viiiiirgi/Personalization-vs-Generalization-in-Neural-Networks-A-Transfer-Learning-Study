@@ -18,9 +18,6 @@ CHANCE = 33.33
 CONDITIONS = ["BSL", "SENSORY", "DELAY"]
 CLASS_LABELS = ["Visual", "Spatial", "Verbal"]
 
-# Insert the exact Subject IDs of the 5 youngest children here
-YOUNGEST_SUBJECTS = ["1383", "3392", "4080", "4179", "4271"] 
-
 mpl.rcParams.update({
     "font.size": 12,
     "axes.spines.top": False,
@@ -161,44 +158,6 @@ for i, cond in enumerate(CONDITIONS):
 plt.suptitle("Confusion matrices", fontweight='bold', y=1.05)
 plt.tight_layout()
 plt.savefig(os.path.join(OUTPUT_DIR, "Figure5_ConfusionMatrices.pdf"), bbox_inches='tight')
-plt.close()
-
-# FIGURE 4: CONFUSION MATRICES (Youngest 5 vs All)
-print("Generating Figure 8: Age Split Confusion Matrices...")
-fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-
-for i, cond in enumerate(["SENSORY", "DELAY"]):
-    # Entire Sample
-    cms_all = [results[cond][sub]["confusion"] for sub in results[cond]]
-    mean_cm_all = np.mean(cms_all, axis=0) * 100
-    
-    sns.heatmap(mean_cm_all, annot=True, fmt=".2f", cmap="jet", vmin=10, vmax=80,
-                xticklabels=CLASS_LABELS, yticklabels=CLASS_LABELS, cbar=False, ax=axes[i, 0])
-    
-    # Youngest Participants
-    cms_young = [results[cond][sub]["confusion"] for sub in YOUNGEST_SUBJECTS if sub in results[cond]]
-    mean_cm_young = np.mean(cms_young, axis=0) * 100 if cms_young else np.zeros((3,3))
-    
-    sns.heatmap(mean_cm_young, annot=True, fmt=".2f", cmap="jet", vmin=10, vmax=80,
-                xticklabels=CLASS_LABELS, yticklabels=CLASS_LABELS, 
-                cbar=(i==1), cbar_kws={'label': 'Classification accuracy(%)'} if i==1 else None, ax=axes[i, 1])
-
-# Formatting axes
-axes[0,0].set_title("Entire sample (7y-12y)", fontweight='bold', pad=15)
-axes[0,1].set_title("Youngest participants (7y-8y 3mo)", fontweight='bold', pad=15)
-
-axes[0,0].set_title("Sensory")
-axes[0,1].set_title("Sensory")
-axes[1,0].set_title("Delay")
-axes[1,1].set_title("Delay")
-
-axes[0,0].set_ylabel("Trained class")
-axes[1,0].set_ylabel("Trained class")
-axes[1,0].set_xlabel("Tested class")
-axes[1,1].set_xlabel("Tested class")
-
-plt.tight_layout()
-plt.savefig(os.path.join(OUTPUT_DIR, "Figure8_YoungestComparison.pdf"), bbox_inches='tight')
 plt.close()
 
 
