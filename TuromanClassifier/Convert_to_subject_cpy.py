@@ -15,7 +15,7 @@ DTYPE = np.float32
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-
+# extracts all the subject IDs from the second to last column
 def get_unique_subjects(csv_file):
 
     subjects = set()
@@ -30,7 +30,7 @@ def get_unique_subjects(csv_file):
     return sorted(subjects)
 
 
-
+# only keeps the rows belonging to one subject
 def load_one_subject(csv_file, subject_id):
 
     subject_chunks = []
@@ -57,7 +57,8 @@ def load_one_subject(csv_file, subject_id):
     return data
 
 
-
+# Split datas in X_time (EEG values), labels (class label 1,3,5), channels (channel ID) and trials (trial ID)
+# Reconstruct a 3D tensor X[trial_index, channel_index, time] = EEG value
 def reconstruct_trials(data):
 
     X_time = data[:, :-4]
