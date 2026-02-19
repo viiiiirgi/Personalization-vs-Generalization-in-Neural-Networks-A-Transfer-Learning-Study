@@ -8,21 +8,26 @@ from sklearn.metrics import accuracy_score
 from imblearn.over_sampling import RandomOverSampler
 from sklearn.metrics import confusion_matrix
 
-
+OUTPUT_DIR = "results"
 DATA_DIR = "subject_npy"
+
 CONDITIONS = ["BSL", "SENSORY", "DELAY"]
 CLASSES = [1, 3, 5]  # Visual, Spatial, Verbal
 
-N_ITERATIONS = 100
-TRIALS_PER_AVG = 5
-TRIALS_COUNT = 100
+N_ITERATIONS = 100 #for the repeated cross-validation
+TRIALS_PER_AVG = 5 #pseudo-trial is the average of 5 real trials
+TRIALS_COUNT = 100 # generate 100 pseudo-trials per class
 
 np.random.seed(42)
 
+if not os.path.exists(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR)
 
+#Match the paper's time windows (Baseline 0-300 ms, Sensory 0-1000 ms, Delay 1000-3000 ms)
 def get_time_window_indices(condition, n_times):
 
-    sampling_rate = n_times / 3.3
+    total_duration= 3.3
+    sampling_rate = n_times / total_duration
 
     if condition == "BSL":
         return 0, int(0.3 * sampling_rate)
@@ -34,7 +39,7 @@ def get_time_window_indices(condition, n_times):
         return int(1.3 * sampling_rate), int(3.3 * sampling_rate)
 
 
-
+# EEG is noisy -> averaging trials improves signal to noise ratio
 def create_pseudo_trials(X, y, n_pseudo=100, trials_per_avg=5):
 
     X_new = []
@@ -50,16 +55,19 @@ def create_pseudo_trials(X, y, n_pseudo=100, trials_per_avg=5):
             continue
 
         for _ in range(n_pseudo):
+            #Sample 5 trials
             sampled = np.random.choice(idx, size=trials_per_avg, replace=True)
+            #Average the trials
             X_new.append(X[sampled].mean(axis=0))
             y_new.append(label)
 
     return np.array(X_new), np.array(y_new)
 
 
-
+# time-averaged decoding for one subject and one condition
 def run_subject(npy_file, condition):
 
+    #load subject data
     data = np.load(npy_file, allow_pickle=True).item()
 
     X = data["X"]   # (trials, channels, time)
@@ -76,10 +84,11 @@ def run_subject(npy_file, condition):
     if X_window.shape[1] == 0:
         raise ValueError("Time window selection is empty")
 
-
+    # 100 independent random splits, 67% train and 33% test
     sss = StratifiedShuffleSplit(
         n_splits=N_ITERATIONS,
-        test_size=0.33
+        test_size=0.33,
+        random_state=42
     )
 
     iteration_scores = []
@@ -91,28 +100,21 @@ def run_subject(npy_file, condition):
         X_train, X_test = X_window[train_idx], X_window[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
 
-        # Create pseudo-trials (5 per average)
+        # Create pseudo-trials separately for train and test
         X_train_avg, y_train_avg = create_pseudo_trials(X_train, y_train)
         X_test_avg, y_test_avg = create_pseudo_trials(X_test, y_test)
 
         if len(np.unique(y_train_avg)) < 2:
             continue
 
-        # Demean across trials (train mean only)
+        # Demean across trials (subtract the mean of training data from train and test to remove the amplitude differences and center features)
         train_mean = X_train_avg.mean(axis=0)
         X_train_avg -= train_mean
         X_test_avg -= train_mean
 
-        # Oversample minority class (training only)
-        ros = RandomOverSampler()
-        X_train_bal, y_train_bal = ros.fit_resample(
-            X_train_avg,
-            y_train_avg
-        )
-
         # Train LDA
         lda = LinearDiscriminantAnalysis()
-        lda.fit(X_train_bal, y_train_bal)
+        lda.fit(X_train_avg, y_train_avg)
 
         preds = lda.predict(X_test_avg)
 
@@ -128,6 +130,7 @@ def run_subject(npy_file, condition):
 
         conf_matrix_total += cm
 
+    # average accuracy over 100 splits
     mean_acc = np.mean(iteration_scores)
     # Convert counts to proportions
     row_sums = conf_matrix_total.sum(axis=1, keepdims=True)
@@ -138,7 +141,7 @@ def run_subject(npy_file, condition):
     return mean_acc, conf_matrix_prop
 
 
-
+# loops over all subjects in one condition
 def run_condition(condition):
 
     print(f"\n========== {condition} ==========")
@@ -188,7 +191,7 @@ if __name__ == "__main__":
             f"{np.mean(subject_accuracies)*100:.2f}%"
         )
 
-    with open("turoman_results.pkl", "wb") as f:
+    with open(os.path.join(OUTPUT_DIR, "turoman_results.pkl"), "wb") as f:
         pickle.dump(all_results, f)
 
     print(f"\nTotal time: {(time.time()-start)/60:.2f} minutes")
