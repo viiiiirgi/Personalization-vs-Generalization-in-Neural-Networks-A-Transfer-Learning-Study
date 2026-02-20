@@ -5,8 +5,8 @@ import pickle
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import accuracy_score
-from imblearn.over_sampling import RandomOverSampler
 from sklearn.metrics import confusion_matrix
+from scipy.stats import ttest_1samp
 
 OUTPUT_DIR = "results"
 DATA_DIR = "subject_npy"
@@ -17,6 +17,8 @@ CLASSES = [1, 3, 5]  # Visual, Spatial, Verbal
 N_ITERATIONS = 100 #for the repeated cross-validation
 TRIALS_PER_AVG = 5 #pseudo-trial is the average of 5 real trials
 TRIALS_COUNT = 100 # generate 100 pseudo-trials per class
+
+CHANCE = 1/3
 
 np.random.seed(42)
 
@@ -140,6 +142,23 @@ def run_subject(npy_file, condition):
 
     return mean_acc, conf_matrix_prop
 
+def compute_statistics(subject_accuracies):
+
+    subject_accuracies = np.array(subject_accuracies)
+
+    mean_acc = np.mean(subject_accuracies)
+    median_acc = np.median(subject_accuracies)
+    sd_acc = np.std(subject_accuracies, ddof=1)
+
+    t_val, p_val = ttest_1samp(subject_accuracies, CHANCE)
+
+    return {
+        "mean": mean_acc,
+        "median": median_acc,
+        "sd": sd_acc,
+        "t_value": t_val,
+        "p_value": p_val
+    }
 
 # loops over all subjects in one condition
 def run_condition(condition):
@@ -180,16 +199,24 @@ if __name__ == "__main__":
     for condition in CONDITIONS:
         all_results[condition] = run_condition(condition)
 
-    print("\n--- Final Mean Accuracies ---")
+    print("\n--- Statistics vs chance ---")
 
     for condition in all_results:
 
         subject_accuracies = [res["accuracy"] for res in all_results[condition].values()]
 
+        stats = compute_statistics(subject_accuracies)
+
         print(
             f"{condition}: "
-            f"{np.mean(subject_accuracies)*100:.2f}%"
+            f"Mean accuracy: {stats['mean']*100:.2f}%"
+            f" Median accuracy: {stats['median']*100:.2f}%"
+            f" SD: {stats['sd']*100:.2f}%"
+            f" t-value: {stats['t_value']:.2f}"
+            f" p-value: {stats['p_value']:.4e}"
         )
+
+        all_results[condition]["group_stats"] = stats
 
     with open(os.path.join(OUTPUT_DIR, "turoman_results.pkl"), "wb") as f:
         pickle.dump(all_results, f)
