@@ -25,7 +25,7 @@ np.random.seed(42)
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
-#Match the paper's time windows (Baseline 0-300 ms, Sensory 0-1000 ms, Delay 1000-3000 ms)
+#Match the paper's time windows (Baseline 0-300 ms, Sensory 0-1300 ms, Delay 1300-3300 ms)
 def get_time_window_indices(condition, n_times):
 
     total_duration= 3.3
