@@ -43,7 +43,7 @@ for cond in CONDITIONS:
         })
 df = pd.DataFrame(rows)
 
-# ============================
+
 # FIGURE 1: VIOLIN PLOTS
 print("Generating Figure 1: Time-Averaged Accuracy Violin Plots...")
 palette = {
