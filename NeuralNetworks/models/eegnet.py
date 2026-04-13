@@ -8,8 +8,10 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.constraints import max_norm
 
 
-def EEGNet(nb_classes, Chans, Samples, dropoutRate=0.5, kernLength=64, F1=8, D=2, F2=16):
+def EEGNet(nb_classes, Chans, Samples, dropoutRate=0.5, kernLength=64, F1=8, D=2, F2=None):
 
+    if F2 is None:
+        F2 = F1*D
     input1 = Input(shape=(Chans, Samples, 1))
 
     # Block 1 Temporal and spatial filtering
