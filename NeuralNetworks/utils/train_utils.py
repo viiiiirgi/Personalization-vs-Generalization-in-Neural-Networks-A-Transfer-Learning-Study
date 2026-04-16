@@ -4,7 +4,10 @@ import random
 from tensorflow.keras import backend as K
 from tensorflow.keras.optimizers import Adam
 from models.eegnet import EEGNet
-
+# for gpu
+#from tensorflow.keras import mixed_precision
+#mixed_precision.set_global_policy('mixed_float16')
+from tensorflow.keras.callbacks import EarlyStopping
 
 def set_seed(seed):
     np.random.seed(seed)
@@ -14,7 +17,7 @@ def set_seed(seed):
 
 def normalize_train_test(X_train, X_test):
     mean = X_train.mean(axis=0, keepdims=True)
-    std = X_train.std(axis=(0,2,3), keepdims=True) + 1e-8
+    std = X_train.std(axis=(0,2), keepdims=True) + 1e-6
 
     X_train = (X_train - mean) / std
     X_test = (X_test - mean) / std
@@ -22,7 +25,7 @@ def normalize_train_test(X_train, X_test):
     return X_train, X_test
 
 
-def create_pseudo_trials(X, y, n_pseudo=100, trials_per_avg=5):
+def create_pseudo_trials(X, y, n_pseudo=30, trials_per_avg=5):
     X_new, y_new = [], []
     classes = np.unique(y)
 

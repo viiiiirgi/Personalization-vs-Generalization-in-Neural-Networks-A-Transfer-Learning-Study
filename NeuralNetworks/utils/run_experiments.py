@@ -6,6 +6,9 @@ from experiments.experiments_eegnet import (
     run_transfer_learning
 )
 
+from utils.train_utils import set_seed
+set_seed(42) 
+
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -13,7 +16,7 @@ RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 MODEL = "eegnet"   # "eegnet", "tcn", "cfc"
 MODE = "SD"      # "SD", "SI", "TL", "ALL"
-CONDITIONS = ["BSL", "DELAY", "SENSORY"]
+CONDITIONS = ["BSL"]#, "BSL", "DELAY", "SENSORY"]
 
 def main():
 

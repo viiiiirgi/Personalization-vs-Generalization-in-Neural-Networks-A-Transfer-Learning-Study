@@ -8,7 +8,9 @@ from tensorflow.keras.layers import (
 from tensorflow.keras.constraints import max_norm
 
 
-def EEGNet(nb_classes, Chans, Samples, dropoutRate=0.5, kernLength=64, F1=8, D=2, F2=None):
+def EEGNet(nb_classes, Chans, Samples, dropoutRate=0.5, kernLength=16, F1=8, D=2, F2=None):
+
+    kernLength = max(kernLength, Samples // 8)
 
     if F2 is None:
         F2 = F1*D
@@ -50,6 +52,6 @@ def EEGNet(nb_classes, Chans, Samples, dropoutRate=0.5, kernLength=64, F1=8, D=2
     flatten = Flatten()(block2) # flattens the 2d feature maps into a 1d vector
     dense = Dense(nb_classes,
                   kernel_constraint=max_norm(0.25))(flatten) # fully connected layer that maps the extracted features to the number of classes (3 memory conditions)
-    softmax = Activation('softmax')(dense) # converts the final raw scores into probabilities
+    softmax = Activation('softmax', dtype='float32')(dense) # converts the final raw scores into probabilities
 
     return Model(inputs=input1, outputs=softmax)
