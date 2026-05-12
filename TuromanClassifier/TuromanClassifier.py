@@ -7,6 +7,7 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import confusion_matrix
 from scipy.stats import ttest_1samp
+#from sklearn.utils import resample
 
 OUTPUT_DIR = "results"
 DATA_DIR = "subject_npy"
@@ -20,29 +21,17 @@ TRIALS_COUNT = 100 # generate 100 pseudo-trials per class
 
 CHANCE = 1/3
 
-np.random.seed(42)
+#np.random.seed(1)  remove for random resampling across iterations, not one fixed configuration (seed fixes pseudo-trial creation and fixes shuffle behavior)
 
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
-#Match the paper's time windows (Baseline 0-300 ms, Sensory 0-1300 ms, Delay 1300-3300 ms)
-def get_time_window_indices(condition, n_times):
+#Match the paper's time windows (Baseline 0-300 ms, Sensory 300-1300 ms, Delay 1300-3300 ms)
 
-    total_duration= 3.3
-    sampling_rate = n_times / total_duration
-
-    if condition == "BSL":
-        return 0, int(0.3 * sampling_rate)
-
-    elif condition == "SENSORY":
-        return int(0.3 * sampling_rate), int(1.3 * sampling_rate)
-
-    elif condition == "DELAY":
-        return int(1.3 * sampling_rate), int(3.3 * sampling_rate)
 
 
 # EEG is noisy -> averaging trials improves signal to noise ratio
-def create_pseudo_trials(X, y, n_pseudo=100, trials_per_avg=5):
+def create_pseudo_trials(X, y, trials_per_avg=TRIALS_PER_AVG, n_trials= TRIALS_COUNT):
 
     X_new = []
     y_new = []
@@ -53,18 +42,54 @@ def create_pseudo_trials(X, y, n_pseudo=100, trials_per_avg=5):
 
         idx = np.where(y == label)[0]
 
-        if len(idx) == 0:
+        if len(idx) < trials_per_avg:
             continue
 
-        for _ in range(n_pseudo):
-            #Sample 5 trials
-            sampled = np.random.choice(idx, size=trials_per_avg, replace=True)
-            #Average the trials
-            X_new.append(X[sampled].mean(axis=0))
+        # shuffle once
+        #np.random.shuffle(idx)
+
+        # split into non-overlapping groups
+        #n_groups = len(idx) // trials_per_avg
+
+        #for i in range(n_groups):
+        #    group = idx[i*trials_per_avg:(i+1)*trials_per_avg]
+        #    X_new.append(X[group].mean(axis=0))
+        #    y_new.append(label)
+
+        # Create exactly n_trials pseudo-trials
+        for _ in range(n_trials):
+
+            sampled_idx = np.random.choice(
+                idx,
+                size=trials_per_avg,
+                replace=False
+            )
+
+            pseudo = X[sampled_idx].mean(axis=0)
+
+            X_new.append(pseudo)
             y_new.append(label)
+        
 
     return np.array(X_new), np.array(y_new)
 
+#def balance_classes(X, y):
+#    X_bal, y_bal = [], []
+#    max_n = max([np.sum(y == c) for c in np.unique(y)])
+
+#    for c in np.unique(y):
+#        X_c = X[y == c]
+#        y_c = y[y == c]
+
+#        X_up, y_up = resample(X_c, y_c,
+#                             replace=True,
+#                             n_samples=max_n,
+#                             random_state=None)
+
+#        X_bal.append(X_up)
+#        y_bal.append(y_up)
+
+#    return np.vstack(X_bal), np.hstack(y_bal)
 
 # time-averaged decoding for one subject and one condition
 def run_subject(npy_file, condition):
@@ -76,12 +101,16 @@ def run_subject(npy_file, condition):
     y = data["y"]
 
     n_trials, n_channels, n_times = X.shape
+    print(X.shape)
 
     # Extract correct time window
-    start_t, end_t = get_time_window_indices(condition, n_times)
+    #start_t, end_t = get_time_window_indices(condition, n_times)
     
     # Average across time window
-    X_window = X[:, :, start_t:end_t].mean(axis=2)   # trials × channels
+    #X_window = X[:, :, start_t:end_t].mean(axis=2)   # trials × channels
+
+    # Average entire epoch
+    X_window = X.mean(axis=2)
 
     if X_window.shape[1] == 0:
         raise ValueError("Time window selection is empty")
@@ -89,15 +118,14 @@ def run_subject(npy_file, condition):
     # 100 independent random splits, 67% train and 33% test
     sss = StratifiedShuffleSplit(
         n_splits=N_ITERATIONS,
-        test_size=0.33,
-        random_state=42
+        test_size=0.33
     )
 
     iteration_scores = []
     conf_matrix_total = np.zeros((3, 3))
 
-
     for train_idx, test_idx in sss.split(X_window, y):
+
 
         X_train, X_test = X_window[train_idx], X_window[test_idx]
         y_train, y_test = y[train_idx], y[test_idx]
@@ -105,6 +133,14 @@ def run_subject(npy_file, condition):
         # Create pseudo-trials separately for train and test
         X_train_avg, y_train_avg = create_pseudo_trials(X_train, y_train)
         X_test_avg, y_test_avg = create_pseudo_trials(X_test, y_test)
+
+        #without pseudo trials
+        #X_train_avg, y_train_avg = X_train.copy(), y_train.copy()
+        #X_test_avg,  y_test_avg  = X_test.copy(),  y_test.copy()
+
+        #balancing
+        #X_train_avg, y_train_avg =balance_classes(X_train_avg, y_train_avg)
+        #X_test_avg, y_test_avg =balance_classes(X_test_avg, y_test_avg)
 
         if len(np.unique(y_train_avg)) < 2:
             continue
@@ -115,7 +151,11 @@ def run_subject(npy_file, condition):
         X_test_avg -= train_mean
 
         # Train LDA
-        lda = LinearDiscriminantAnalysis()
+        lda = LinearDiscriminantAnalysis(
+            solver="lsqr",
+            shrinkage="auto"
+        )
+
         lda.fit(X_train_avg, y_train_avg)
 
         preds = lda.predict(X_test_avg)
@@ -131,6 +171,8 @@ def run_subject(npy_file, condition):
         )
 
         conf_matrix_total += cm
+
+    
 
     # average accuracy over 100 splits
     mean_acc = np.mean(iteration_scores)
@@ -150,7 +192,7 @@ def compute_statistics(subject_accuracies):
     median_acc = np.median(subject_accuracies)
     sd_acc = np.std(subject_accuracies, ddof=1)
 
-    t_val, p_val = ttest_1samp(subject_accuracies, CHANCE)
+    t_val, p_val = ttest_1samp(subject_accuracies, CHANCE, alternative="greater")
 
     return {
         "mean": mean_acc,
