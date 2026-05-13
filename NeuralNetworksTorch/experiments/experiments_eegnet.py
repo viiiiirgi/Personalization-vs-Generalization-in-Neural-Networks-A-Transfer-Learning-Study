@@ -8,20 +8,21 @@ from utils.train_utils import (
     build_model,
     train_model,
     predict_model,
-    compute_statistics
+    compute_statistics,
+    balance_classes
 )
 import gc
 import os
 import torch
 
-
-EPOCHS = 2
-BATCH_SIZE = 256
+EPOCHS_PRETRAIN = 20
+EPOCHS = 30
+BATCH_SIZE = 64
 
 
 
 # train and test on the same subject
-def run_subject_dependent(file, model_name, n_runs=1, all_data=None):
+def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
 
     if all_data is not None:
         # extract filename only (because keys are filenames, not full paths)
@@ -53,18 +54,33 @@ def run_subject_dependent(file, model_name, n_runs=1, all_data=None):
                 X, y, test_size=0.3, random_state=seed
             )
 
-        #normalization
+        # normalization
         X_train_n, X_test_n = normalize_train_test(X_train, X_test)
 
-        #pseudo trials (averages groups of trials reducing noise)
-        X_train_p, y_train_p = create_pseudo_trials(X_train_n, y_train)
-        X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test)
+        
+        # split TRAIN into train/val BEFORE pseudo-trials
+        X_tr, X_val, y_tr, y_val = train_test_split(
+            X_train_n, y_train, test_size=0.2, stratify=y_train, random_state=seed
+        )
+
+        # create pseudo-trials separately (averages groups of trials reducing noise)
+        X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
+        X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
+        X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
+
+        # NO pseudo-trials → use raw data
+    #    X_tr_p, y_tr_p = X_tr, y_tr
+    #    X_val_p, y_val_p = X_val, y_val
+    #    X_test_p, y_test_p = X_test_n, y_test
+
+        #balancing classes
+    #    X_tr_p, y_tr_p = balance_classes(X_tr_p, y_tr_p)
 
         # creates the eegnet, the TCN or the CfC
         model = build_model(model_name, chans, samples)
 
         #Early stopping: stops if validation loss doesn't improve
-        train_model(model, X_train_p, y_train_p, EPOCHS, BATCH_SIZE)
+        train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE, X_val=X_val_p, y_val=y_val_p)
         
         # convert probabilities into class labeles
         preds = predict_model(model, X_test_p)
@@ -83,7 +99,7 @@ def run_subject_dependent(file, model_name, n_runs=1, all_data=None):
     return np.mean(accs), cm_avg
 
 # train on all subjects except one, test on that one
-def run_subject_independent(files, model_name, data_dir, n_runs=1, all_data=None):
+def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=None):
 
     results = {}
     accuracies = []
@@ -132,17 +148,37 @@ def run_subject_independent(files, model_name, data_dir, n_runs=1, all_data=None
             X_train_s, y_train_s = X_train[perm], y_train[perm]
 
             #normalization
-            X_train_n, X_test_n = normalize_train_test(X_train_s, X_test)
+            #X_train_n, X_test_n = normalize_train_test(X_train_s, X_test)
+            
+            # normalize training data normally
+            X_train_n, _ = normalize_train_test(X_train_s, X_train_s)
 
-            #pseudo trials (averages groups of trials reducing noise)
-            X_train_p, y_train_p = create_pseudo_trials(X_train_n, y_train_s)
-            X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test)
+            # normalize test subject using its own stats
+            _, X_test_n = normalize_train_test(X_test, X_test)
+
+            # split TRAIN into train/val BEFORE pseudo-trials
+            X_tr, X_val, y_tr, y_val = train_test_split(
+                X_train_n, y_train_s, test_size=0.2, stratify=y_train_s, random_state=seed
+            )
+
+            # create pseudo-trials separately (averages groups of trials reducing noise)
+        #    X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
+        #    X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
+        #    X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
+            
+            # NO pseudo-trials → use raw data
+            X_tr_p, y_tr_p = X_tr, y_tr
+            X_val_p, y_val_p = X_val, y_val
+            X_test_p, y_test_p = X_test_n, y_test
+
+            #balancing classes
+        #    X_tr_p, y_tr_p = balance_classes(X_tr_p, y_tr_p)
 
             # creates the eegnet, the TCN or the CfC
             model = build_model(model_name, X_train.shape[1], X_train.shape[2])
 
             #Early stopping: stops if validation loss doesn't improve
-            train_model(model, X_train_p, y_train_p, EPOCHS, BATCH_SIZE)
+            train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE,X_val=X_val_p, y_val=y_val_p)
             
             # convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
@@ -173,7 +209,7 @@ def run_subject_independent(files, model_name, data_dir, n_runs=1, all_data=None
     return results
 
 
-def run_transfer_learning(files, model_name, data_dir, n_runs=1, fine_tune_split=0.3, all_data=None):
+def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_split=0.3, all_data=None):
 
     results = {}
     accuracies = []
@@ -235,22 +271,47 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=1, fine_tune_split
             gc.collect()
 
             # Normalization using the pretraining stats (avoids leakage from target subject)
-            X_pretrain_n, X_test_n = normalize_train_test(X_pretrain, X_test)
-            _, X_ft_n = normalize_train_test(X_pretrain, X_ft)
+            #X_pretrain_n, X_test_n = normalize_train_test(X_pretrain, X_test)
+            #_, X_ft_n = normalize_train_test(X_pretrain, X_ft)
+            
+            # normalize pretraining separately
+            X_pretrain_n, _ = normalize_train_test(X_pretrain, X_pretrain)
+
+            # normalize target subject using ONLY its own data
+            X_ft_n, X_test_n = normalize_train_test(X_ft, X_test)
+
+            # split TRAIN into train/val BEFORE pseudo-trials
+            X_ft_tr, X_ft_val, y_ft_tr, y_ft_val = train_test_split(
+                X_ft_n, y_ft, test_size=0.2, stratify=y_ft, random_state=seed
+            )
 
             # Pseudo trials (averages groups of trials reducing noise) (applied to pretraining, fine-tuning and testing)
-            X_pre_p, y_pre_p = create_pseudo_trials(X_pretrain_n, y_pretrain)
-            X_ft_p, y_ft_p = create_pseudo_trials(X_ft_n, y_ft)
-            X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test)
+        #    X_pre_p, y_pre_p = create_pseudo_trials(X_pretrain_n, y_pretrain)
+        #    X_ft_tr_p, y_ft_tr_p = create_pseudo_trials(X_ft_tr, y_ft_tr, seed=seed)
+        #    X_ft_val_p, y_ft_val_p = create_pseudo_trials(X_ft_val, y_ft_val, seed=seed+1)
+        #    X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
+            
+             # NO pseudo-trials → use raw data
+            X_pre_p, y_pre_p = X_pretrain_n, y_pretrain
+            X_ft_tr_p, y_ft_tr_p = X_ft_tr, y_ft_tr
+            X_ft_val_p, y_ft_val_p = X_ft_val, y_ft_val
+            X_test_p, y_test_p = X_test_n, y_test
+
+            #balancing classes
+        #    X_pre_p, y_pre_p = balance_classes(X_pre_p, y_pre_p)
+        #    X_ft_tr_p, y_ft_tr_p = balance_classes(X_ft_tr_p, y_ft_tr_p)
+
+            #pretraining split
+            X_pre_tr, X_pre_val, y_pre_tr, y_pre_val = train_test_split(
+                X_pre_p, y_pre_p, test_size=0.1, stratify=y_pre_p, random_state=seed
+            )
 
             # Build model
             model = build_model(model_name, X_pretrain.shape[1], X_pretrain.shape[2])
 
-            
             #Pretraining: learn general patterns 
-            train_model(model, X_pre_p, y_pre_p, EPOCHS, BATCH_SIZE)
+            train_model(model, X_pre_p, y_pre_p, EPOCHS_PRETRAIN, BATCH_SIZE, X_val=X_pre_val, y_val=y_pre_val)
         
-
             # FINE-TUNING (PyTorch)
             # freeze all layers except final FC
             for name, param in model.named_parameters():
@@ -258,19 +319,23 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=1, fine_tune_split
                     param.requires_grad = False
 
             # new optimizer (only trainable params)
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            optimizer = torch.optim.Adam( filter(lambda p: p.requires_grad, model.parameters()), lr=5e-4)
             criterion = torch.nn.CrossEntropyLoss()
 
             device = next(model.parameters()).device
 
-            train_model(model, X_ft_p, y_ft_p, EPOCHS, BATCH_SIZE, lr=1e-4)
+            train_model(model, X_ft_tr_p, y_ft_tr_p, EPOCHS, BATCH_SIZE, X_val=X_ft_val_p, y_val=y_ft_val_p, optimizer=optimizer)
 
-            # convert probabilities into class labeles
+            #TEST convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
 
             #store results across runs
             accs.append(accuracy_score(y_test_p, preds))
             cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
+
+            #Cleanup
+            del model
+            torch.cuda.empty_cache()
             
 
         #final confusion matrix: normalizes per class and make percentages
