@@ -18,7 +18,17 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 CHANCE = 33.33
 CONDITIONS = ["BSL", "SENSORY", "DELAY"]
 CLASS_LABELS = ["Visual", "Spatial", "Verbal"]
-SUFFIX = "sd"  # subject-independent files: {COND}_si.npy
+
+# Change this value to switch between strategies: "si", "sd", or "tl"
+SUFFIX = "si" 
+# Strategy mapping dictionary
+STRATEGY_MAP = {
+    "si": "Subject-Independent",
+    "sd": "Subject-Dependent",
+    "tl": "Transfer Learning"
+}
+# Fallback safely if suffix is not recognized
+STRATEGY_NAME = STRATEGY_MAP.get(SUFFIX.lower(), SUFFIX.upper())
 
 mpl.rcParams.update({
     "font.size": 12,
@@ -60,7 +70,7 @@ def significance_star(p):
 
 
 def main():
-    print("Loading EEGNet SI results...")
+    print(f"Loading EEGNet {STRATEGY_NAME} results...")
     results = {cond: load_condition_results(cond) for cond in CONDITIONS}
 
     # Build accuracy dataframe (Turoman figure style)
@@ -71,10 +81,8 @@ def main():
             rows.append({"Condition": cond, "Subject": sub, "Accuracy": acc})
     df = pd.DataFrame(rows)
 
-    # ------------------------------------------------------------------
-    # Figure A: Violin plot across BSL/SENSORY/DELAY (Turoman style)
-    # ------------------------------------------------------------------
-    print("Generating SI violin plot...")
+    # Figure A: Violin plot across BSL/SENSORY/DELAY 
+    print(f"Generating {SUFFIX.upper()} violin plot...")
     palette = {
         "BSL": "lightgray",
         "SENSORY": "#9BDDB7",
@@ -106,7 +114,7 @@ def main():
         ax=ax,
     )
 
-    ax.axhline(CHANCE, linestyle="--", color="black", linewidth=1.5, zorder=0)
+    ax.axhline(CHANCE, linestyle="-.", color="black", linewidth=1.5, zorder=0)
 
     legend_elements = []
     for i, cond in enumerate(CONDITIONS):
@@ -123,18 +131,16 @@ def main():
     legend_elements.append(Line2D([0], [0], color="black", linewidth=1.5, linestyle="--", label=f"Chance ({CHANCE}%)"))
     ax.legend(handles=legend_elements, loc="upper right", frameon=False, fontsize=10)
 
-    ax.set_title("EEGNet Subject-Independent: Classification accuracy", fontweight="bold", pad=25)
+    ax.set_title(f"EEGNet {STRATEGY_NAME}: Classification accuracy", fontweight="bold", pad=25)
     ax.set_ylabel("Classification accuracy (%)")
     ax.set_xlabel("")
     ax.set_ylim(0, 105)
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, "f{SUFFIX}_Figure2_Accuracy.pdf"), bbox_inches="tight")
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{SUFFIX}_Figure2_Accuracy.pdf"), bbox_inches="tight")
     plt.close()
 
-    # ------------------------------------------------------------------
     # Figure B: Individual paired SENSORY vs DELAY (Turoman style)
-    # ------------------------------------------------------------------
-    print("Generating SI paired sensory-delay plot...")
+    print(f"Generating {SUFFIX.upper()} paired sensory-delay plot...")
     fig, ax = plt.subplots(figsize=(7, 6))
 
     sens = extract_accuracy_percent(results["SENSORY"])
@@ -164,15 +170,13 @@ def main():
     ax.set_xlim(0.8, 2.2)
     ax.set_ylim(10, 100)
     ax.set_ylabel("Classification accuracy (%)")
-    ax.set_title("EEGNet SI: Classification accuracy per individual", fontweight="bold")
+    ax.set_title(f"EEGNet {SUFFIX.upper()}: Classification accuracy per individual", fontweight="bold")
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, "f{SUFFIX}_Figure6_IndividualAccuracy.pdf"), bbox_inches="tight")
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{SUFFIX}_Figure6_IndividualAccuracy.pdf"), bbox_inches="tight")
     plt.close()
 
-    # ------------------------------------------------------------------
-    # Figure C: Confusion matrices for BSL/SENSORY/DELAY (Turoman style)
-    # ------------------------------------------------------------------
-    print("Generating SI confusion matrices...")
+    # Figure C: Confusion matrices for BSL/SENSORY/DELAY 
+    print(f"Generating {SUFFIX.upper()} confusion matrices...")
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     for i, cond in enumerate(CONDITIONS):
         cms = extract_confusions(results[cond])
@@ -195,15 +199,13 @@ def main():
         if i == 0:
             axes[i].set_ylabel("Trained class")
 
-    plt.suptitle("EEGNet SI: Confusion matrices", fontweight="bold", y=1.05)
+    plt.suptitle(f"EEGNet {STRATEGY_NAME}: Confusion matrices", fontweight="bold", y=1.05)
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, f"{SUFFIX}_Figure5_ConfusionMatrices.pdf"), bbox_inches="tight")
     plt.close()
 
-    # ------------------------------------------------------------------
-    # Stats printout (Turoman style)
-    # ------------------------------------------------------------------
-    print("\n===== EEGNet SI T-TEST VS CHANCE =====")
+    # Stats printout 
+    print(f"\n===== EEGNet {STRATEGY_NAME.upper()} T-TEST VS CHANCE =====")
     for cond in CONDITIONS:
         accs = list(extract_accuracy_percent(results[cond]).values())
         t, p = ttest_1samp(accs, CHANCE)
@@ -212,9 +214,8 @@ def main():
         print(f"t-value: {t:.2f}")
         print(f"p-value: {p:.4e}")
 
-    print(f"\nAll SI figures saved in: {OUTPUT_DIR}")
+    print(f"\nAll {SUFFIX.upper()} figures saved in: {OUTPUT_DIR}")
 
 
 if __name__ == "__main__":
     main()
-

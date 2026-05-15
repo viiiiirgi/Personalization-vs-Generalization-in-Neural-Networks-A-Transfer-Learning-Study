@@ -36,6 +36,8 @@ with open(INPUT_PATH, "rb") as f:
 rows = []
 for cond in CONDITIONS:
     for sub in results[cond]:
+        if sub == "group_stats":
+            continue
         rows.append({
             "Condition": cond,
             "Subject": sub,
@@ -54,39 +56,58 @@ palette = {
 
 fig, ax = plt.subplots(figsize=(8, 6))
 
-sns.violinplot(x="Condition", y="Accuracy", data=df, palette=palette, 
-               inner="box", cut=0, linewidth=1.2, width=0.6, ax=ax, alpha=0.3)
+vp = sns.violinplot(x="Condition", y="Accuracy", data=df, palette=palette, 
+               inner=None, cut=0, linewidth=1.2, width=0.6, ax=ax)
+for pc in vp.collections:
+    pc.set_alpha(0.3)
 
 sns.stripplot(x="Condition", y="Accuracy", data=df, color="black", 
               size=4, jitter=0.2, alpha=0.4, zorder=2, ax=ax)
 
-ax.axhline(CHANCE, linestyle="--", color="black", linewidth=1.5, zorder=0)
+ax.axhline(CHANCE, linestyle="-.", color="black", linewidth=1.5, zorder=0)
 
-legend_elements = []
+legend_elements = [
+    Line2D([0], [0], color='black', lw=2, label='Mean accuracy'),
+    Line2D([0], [0], marker='o', color='white', markeredgecolor='black',
+           markersize=8, linestyle='None', label='Median accuracy'),
+    Line2D([0], [0], color='black', lw=6, alpha=0.7, label='Standard deviation'),
+    Line2D([0], [0], color='black', marker='o', linestyle='None',
+           markersize=5, alpha=0.4, label='Individual data points'),
+    Line2D([0], [0], color='black', linestyle='-.', lw=1.5, label='Chance level')
+]
 
 for i, cond in enumerate(CONDITIONS):
-    accs = df[df["Condition"]==cond]["Accuracy"]
+    accs = df[df["Condition"] == cond]["Accuracy"]
+
     mu = accs.mean()
-    t, p = ttest_1samp(accs, CHANCE)
     sd = accs.std()
     md = accs.median()
-    
-    ax.hlines(y=mu, xmin=i-0.2, xmax=i+0.2, color=palette[cond], linewidth=4, zorder=3)
 
+    t, p = ttest_1samp(accs, CHANCE)
+
+    # --- STD (vertical bar)
+    ax.vlines(x=i, ymin=mu - sd, ymax=mu + sd,
+              color='black', linewidth=5, alpha=0.7, zorder=3)
+
+    # --- MEAN (horizontal line)
+    ax.hlines(y=mu, xmin=i - 0.2, xmax=i + 0.2,
+              color=palette[cond], linewidth=2, zorder=4)
+
+    # --- MEDIAN (white circle ON TOP)
+    ax.scatter(i, md,
+               color='white', edgecolor='black',
+               s=80, zorder=5)
+
+    # significance
     if p < 0.001: star = "***"
     elif p < 0.01: star = "**"
     elif p < 0.05: star = "*"
     else: star = "n.s."
-    
+
     y_pos = accs.max() + 5
-    ax.text(i, y_pos, f"{star} {mu:.1f}%", 
-            ha="center", fontsize=12, fontweight='bold', color=palette[cond])
-
-    legend_elements.append(Line2D([0], [0], color=palette[cond], lw=4, label=f"{cond} Mean"))
-
-legend_elements.append(Line2D([0], [0], color='black', marker='o', linestyle='None', 
-                              markersize=5, alpha=0.6, label='Individual data points'))
-legend_elements.append(Line2D([0], [0], color='black', linewidth=1.5, linestyle='--', label=f'Chance ({CHANCE}%)'))
+    ax.text(i, y_pos, f"{mu:.0f}% {star}",
+            ha="center", fontsize=12,
+            fontweight='bold', color=palette[cond])
 
 ax.legend(handles=legend_elements, loc='upper right', frameon=False, fontsize=10)
 
@@ -103,7 +124,7 @@ plt.close()
 print("Generating Figure 6: Individual Sensory vs Delay paired plot...")
 fig, ax = plt.subplots(figsize=(7, 6))
 
-subjects = list(results["SENSORY"].keys())
+subjects = [s for s in results["SENSORY"].keys() if s != "group_stats"]
 sensory_acc = [results["SENSORY"][sub]["accuracy"] * 100 for sub in subjects]
 delay_acc = [results["DELAY"][sub]["accuracy"] * 100 for sub in subjects]
 
@@ -143,7 +164,7 @@ print("Generating Figure 5: Confusion Matrices for All Subjects...")
 fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
 for i, cond in enumerate(CONDITIONS):
-    cms = [results[cond][sub]["confusion"] for sub in results[cond]]
+    cms = [results[cond][sub]["confusion"] for sub in results[cond] if sub != "group_stats"]
     mean_cm = np.mean(cms, axis=0) * 100
 
     sns.heatmap(mean_cm, annot=True, fmt=".2f", cmap="jet", vmin=10, vmax=80,
@@ -164,7 +185,7 @@ plt.close()
 # STATISTICS PRINTOUT
 print("\n===== T-TEST VS CHANCE =====")
 for cond in CONDITIONS:
-    accs = [results[cond][sub]["accuracy"] * 100 for sub in results[cond]]
+    accs = [results[cond][sub]["accuracy"] * 100 for sub in results[cond] if sub != "group_stats"]
     t, p = ttest_1samp(accs, CHANCE)
     
     print(f"\n[{cond}]")

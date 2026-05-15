@@ -18,17 +18,13 @@ CLASSES = [1, 3, 5]  # Visual, Spatial, Verbal
 N_ITERATIONS = 100 #for the repeated cross-validation
 TRIALS_PER_AVG = 5 #pseudo-trial is the average of 5 real trials
 TRIALS_COUNT = 100 # generate 100 pseudo-trials per class
-
+ 
 CHANCE = 1/3
 
 #np.random.seed(1)  remove for random resampling across iterations, not one fixed configuration (seed fixes pseudo-trial creation and fixes shuffle behavior)
 
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
-
-#Match the paper's time windows (Baseline 0-300 ms, Sensory 300-1300 ms, Delay 1300-3300 ms)
-
-
 
 # EEG is noisy -> averaging trials improves signal to noise ratio
 def create_pseudo_trials(X, y, trials_per_avg=TRIALS_PER_AVG, n_trials= TRIALS_COUNT):
@@ -102,13 +98,7 @@ def run_subject(npy_file, condition):
 
     n_trials, n_channels, n_times = X.shape
     print(X.shape)
-
-    # Extract correct time window
-    #start_t, end_t = get_time_window_indices(condition, n_times)
     
-    # Average across time window
-    #X_window = X[:, :, start_t:end_t].mean(axis=2)   # trials × channels
-
     # Average entire epoch
     X_window = X.mean(axis=2)
 

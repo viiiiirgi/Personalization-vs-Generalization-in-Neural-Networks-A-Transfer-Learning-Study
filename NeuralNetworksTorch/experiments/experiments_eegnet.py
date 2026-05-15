@@ -55,7 +55,11 @@ def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
             )
 
         # normalization
-        X_train_n, X_test_n = normalize_train_test(X_train, X_test)
+        #X_train_n, X_test_n = normalize_train_test(X_train, X_test)
+
+        # normalize training data normally
+        X_train_n, _ = normalize_train_test(X_train, X_train)
+        _, X_test_n = normalize_train_test(X_test, X_test)
 
         
         # split TRAIN into train/val BEFORE pseudo-trials
