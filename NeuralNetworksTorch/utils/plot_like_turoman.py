@@ -20,7 +20,7 @@ CONDITIONS = ["BSL", "SENSORY", "DELAY"]
 CLASS_LABELS = ["Visual", "Spatial", "Verbal"]
 
 # Change this value to switch between strategies: "si", "sd", or "tl"
-SUFFIX = "si" 
+SUFFIX = "tl" 
 # Strategy mapping dictionary
 STRATEGY_MAP = {
     "si": "Subject-Independent",
@@ -83,6 +83,7 @@ def main():
 
     # Figure A: Violin plot across BSL/SENSORY/DELAY 
     print(f"Generating {SUFFIX.upper()} violin plot...")
+
     palette = {
         "BSL": "lightgray",
         "SENSORY": "#9BDDB7",
@@ -90,18 +91,22 @@ def main():
     }
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    sns.violinplot(
+
+    vp=sns.violinplot(
         x="Condition",
         y="Accuracy",
         data=df,
         palette=palette,
-        inner="box",
+        inner=None,
         cut=0,
         linewidth=1.2,
         width=0.6,
-        ax=ax,
-        alpha=0.3,
+        ax=ax
     )
+
+    for pc in vp.collections:
+        pc.set_alpha(0.3)
+
     sns.stripplot(
         x="Condition",
         y="Accuracy",
@@ -116,19 +121,33 @@ def main():
 
     ax.axhline(CHANCE, linestyle="-.", color="black", linewidth=1.5, zorder=0)
 
-    legend_elements = []
+    legend_elements = [
+        Line2D([0], [0], color='black', lw=2, label='Mean accuracy'),
+        Line2D([0], [0], marker='o', color='white', markeredgecolor='black',
+            markersize=8, linestyle='None', label='Median accuracy'),
+        Line2D([0], [0], color='black', lw=6, alpha=0.7, label='Standard deviation'),
+        Line2D([0], [0], color='black', marker='o', linestyle='None',
+            markersize=5, alpha=0.4, label='Individual data points'),
+        Line2D([0], [0], color='black', linestyle='-.', lw=1.5, label='Chance level')
+    ]
+
     for i, cond in enumerate(CONDITIONS):
         accs = df[df["Condition"] == cond]["Accuracy"].to_numpy()
         mu = np.mean(accs)
+        median= np.median(accs)
+        std_dev = np.std(accs)
+
         _, p = ttest_1samp(accs, CHANCE)
         star = significance_star(p)
 
-        ax.hlines(y=mu, xmin=i - 0.2, xmax=i + 0.2, color=palette[cond], linewidth=4, zorder=3)
-        ax.text(i, np.max(accs) + 5, f"{star} {mu:.1f}%", ha="center", fontsize=12, fontweight="bold", color=palette[cond])
-        legend_elements.append(Line2D([0], [0], color=palette[cond], lw=4, label=f"{cond} Mean"))
+        ax.hlines(y=mu, xmin=i - 0.25, xmax=i + 0.25, color=palette[cond], linewidth=2.5, zorder=2)
+        
+        ax.vlines(x=i, ymin=mu - std_dev, ymax=mu + std_dev, color="#333333", linewidth=6, zorder=3)
+        
+        ax.plot(i, median, marker="o", markerfacecolor="white", markeredgecolor="black", markersize=9, zorder=4)
+        
+        ax.text(i, np.max(accs) + 4, f"{mu:.0f}% {star}", ha="center", fontsize=11, fontweight="bold", color=palette[cond])
 
-    legend_elements.append(Line2D([0], [0], color="black", marker="o", linestyle="None", markersize=5, alpha=0.6, label="Individual data points"))
-    legend_elements.append(Line2D([0], [0], color="black", linewidth=1.5, linestyle="--", label=f"Chance ({CHANCE}%)"))
     ax.legend(handles=legend_elements, loc="upper right", frameon=False, fontsize=10)
 
     ax.set_title(f"EEGNet {STRATEGY_NAME}: Classification accuracy", fontweight="bold", pad=25)

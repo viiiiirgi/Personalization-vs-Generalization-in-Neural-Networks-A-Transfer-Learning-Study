@@ -13,7 +13,7 @@ if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
 
-# SETTINGS
+# Settings
 CHANCE = 33.33
 CONDITIONS = ["BSL", "SENSORY", "DELAY"]
 CLASS_LABELS = ["Visual", "Spatial", "Verbal"]
@@ -26,7 +26,7 @@ mpl.rcParams.update({
 })
 
 
-# LOAD RESULTS
+# Load results
 INPUT_PATH = os.path.join(OUTPUT_DIR, "turoman_results.pkl")
 print("Loading results from turoman_results.pkl...")
 with open(INPUT_PATH, "rb") as f:
@@ -85,15 +85,15 @@ for i, cond in enumerate(CONDITIONS):
 
     t, p = ttest_1samp(accs, CHANCE)
 
-    # --- STD (vertical bar)
+    # STD (vertical bar)
     ax.vlines(x=i, ymin=mu - sd, ymax=mu + sd,
               color='black', linewidth=5, alpha=0.7, zorder=3)
 
-    # --- MEAN (horizontal line)
+    # MEAN (horizontal line)
     ax.hlines(y=mu, xmin=i - 0.2, xmax=i + 0.2,
               color=palette[cond], linewidth=2, zorder=4)
 
-    # --- MEDIAN (white circle ON TOP)
+    # MEDIAN (white circle)
     ax.scatter(i, md,
                color='white', edgecolor='black',
                s=80, zorder=5)
@@ -182,7 +182,7 @@ plt.savefig(os.path.join(OUTPUT_DIR, "Figure5_ConfusionMatrices.pdf"), bbox_inch
 plt.close()
 
 
-# STATISTICS PRINTOUT
+# Statistics printout
 print("\n===== T-TEST VS CHANCE =====")
 for cond in CONDITIONS:
     accs = [results[cond][sub]["accuracy"] * 100 for sub in results[cond] if sub != "group_stats"]
