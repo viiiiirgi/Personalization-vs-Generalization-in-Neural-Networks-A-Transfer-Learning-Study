@@ -3,6 +3,8 @@ import random
 import torch
 from scipy.stats import ttest_1samp
 from models.eegnet_torch import EEGNet
+from sklearn.model_selection import train_test_split
+
 
 # fixes randomness acrosss libraries
 def set_seed(seed):
@@ -23,23 +25,6 @@ def normalize_train_test(X_train, X_test):
 
     return X_train, X_test
 
-def balance_classes(X, y):
-    classes = np.unique(y)
-    #find smallest class
-    min_n = min([np.sum(y == c) for c in classes])
-
-    X_bal, y_bal = [], []
-
-    #downsamples  all the others to match it
-    for c in classes:
-        idx = np.where(y == c)[0]
-        idx_sampled = np.random.choice(idx, size=min_n, replace=False)
-
-        X_bal.append(X[idx_sampled])
-        y_bal.append(y[idx_sampled])
-
-    return np.concatenate(X_bal), np.concatenate(y_bal)
-
 def create_pseudo_trials(X, y, trials_per_avg=5, n_trials=100, seed=None):
 
     if seed is not None:
@@ -57,16 +42,6 @@ def create_pseudo_trials(X, y, trials_per_avg=5, n_trials=100, seed=None):
         if len(idx) < trials_per_avg:
             continue
 
-        #no replacement, no duplication
-        #idx = rng.permutation(idx)   
-        #n_groups = len(idx) // trials_per_avg
-
-        #average trials
-        #for i in range(n_groups):
-        #    group = idx[i * trials_per_avg:(i + 1) * trials_per_avg]
-        #    X_new.append(X[group].mean(axis=0))
-        #    y_new.append(label)
-
         for _ in range(n_trials):
             # Randomly select trials for the average
             # replace=False ensures the same trial isn't picked twice for the SAME pseudo-trial
@@ -80,6 +55,48 @@ def create_pseudo_trials(X, y, trials_per_avg=5, n_trials=100, seed=None):
 
     return np.array(X_new), np.array(y_new)
 
+def augment_eeg(X, noise_std=0.01, scale_range=(0.9, 1.1)):
+    X_aug = X.copy()
+
+    # Gaussian noise
+    noise = np.random.normal(0, noise_std, size=X.shape)
+    X_aug += noise
+
+    # Amplitude scaling
+    scales = np.random.uniform(scale_range[0], scale_range[1], size=(X.shape[0], 1, 1, 1))
+    X_aug *= scales
+
+    return X_aug
+
+def subsample_data(X, y, target_size, seed):
+    np.random.seed(seed)
+    idx = np.random.choice(len(X), target_size, replace=False)
+    return X[idx], y[idx]
+
+def compute_sd_train_size(files, all_data, seed=0):
+    sizes = []
+
+    for f in files:
+        data = all_data[f]
+        X = data["X"]
+        y = np.vectorize({1:0,3:1,5:2}.get)(data["y"])
+
+        try:
+            X_train, _, y_train, _ = train_test_split(
+                X, y, test_size=0.3, stratify=y, random_state=seed
+            )
+        except ValueError:
+            X_train, _, y_train, _ = train_test_split(
+                X, y, test_size=0.3, random_state=seed
+            )
+
+        X_tr, _, _, _ = train_test_split(
+            X_train, y_train, test_size=0.2, stratify=y_train, random_state=seed
+        )
+
+        sizes.append(len(X_tr))
+
+    return 1000#int(np.mean(sizes))  # or min(sizes) 
 
 def build_model(model_name, chans, samples):
     if model_name == "eegnet":
@@ -129,6 +146,7 @@ def train_model(model, X, y, epochs, batch_size,
     if optimizer is None:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
 
+    
     criterion = torch.nn.CrossEntropyLoss()
 
     best_val_loss = float("inf")
@@ -137,7 +155,7 @@ def train_model(model, X, y, epochs, batch_size,
 
     for epoch in range(epochs):
 
-        # ---- TRAIN ----
+        # TRAIN
         model.train()
         perm = torch.randperm(X_train.size(0))
 
@@ -152,7 +170,7 @@ def train_model(model, X, y, epochs, batch_size,
             loss.backward()
             optimizer.step()
 
-        # ---- VALIDATION (only if provided) ----
+        # VALIDATION (only if provided)
         if use_validation:
             model.eval()
             with torch.no_grad():
