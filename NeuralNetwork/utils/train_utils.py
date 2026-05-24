@@ -5,7 +5,6 @@ from scipy.stats import ttest_1samp
 from models.eegnet_torch import EEGNet
 from sklearn.model_selection import train_test_split
 
-
 # fixes randomness acrosss libraries
 def set_seed(seed):
     np.random.seed(seed)
@@ -55,19 +54,6 @@ def create_pseudo_trials(X, y, trials_per_avg=5, n_trials=100, seed=None):
 
     return np.array(X_new), np.array(y_new)
 
-def augment_eeg(X, noise_std=0.01, scale_range=(0.9, 1.1)):
-    X_aug = X.copy()
-
-    # Gaussian noise
-    noise = np.random.normal(0, noise_std, size=X.shape)
-    X_aug += noise
-
-    # Amplitude scaling
-    scales = np.random.uniform(scale_range[0], scale_range[1], size=(X.shape[0], 1, 1, 1))
-    X_aug *= scales
-
-    return X_aug
-
 def subsample_data(X, y, target_size, seed):
     np.random.seed(seed)
     idx = np.random.choice(len(X), target_size, replace=False)
@@ -96,7 +82,7 @@ def compute_sd_train_size(files, all_data, seed=0):
 
         sizes.append(len(X_tr))
 
-    return 1000#int(np.mean(sizes))  # or min(sizes) 
+    return min(sizes) 
 
 def build_model(model_name, chans, samples):
     if model_name == "eegnet":

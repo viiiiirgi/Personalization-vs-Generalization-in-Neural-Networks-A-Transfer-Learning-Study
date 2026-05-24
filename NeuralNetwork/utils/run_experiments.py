@@ -16,9 +16,9 @@ BASE_DIR = BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '.
 DATA_DIR = os.path.join(BASE_DIR, "data")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
-MODEL = "tcn"   # "eegnet", "tcn", "cfc" 
-MODE = "SI"      # "SD", "SI", "TL", "ALL"
-CONDITIONS = ["BSL", "DELAY", "SENSORY"] #["BSL", "DELAY", "SENSORY"]
+MODEL = "eegnet"   # "eegnet", "tcn", "cfc" 
+MODE = "TL"      # "SD", "SI", "TL", "ALL"
+CONDITIONS = [ "DELAY", "SENSORY"] #["BSL", "DELAY", "SENSORY"]
 
 def main():
     
@@ -26,7 +26,7 @@ def main():
         
         print(f"Running condition: {CONDITION}")
 
-        save_dir = os.path.join(RESULTS_DIR, MODEL)
+        save_dir = os.path.join(RESULTS_DIR, MODEL,"AllData_PseudoTrain")
         os.makedirs(save_dir, exist_ok=True)
 
         files = sorted(
@@ -50,10 +50,11 @@ def main():
             accs = []
 
             for f in files:
-                acc, cm = run_subject_dependent(f"{DATA_DIR}/{f}", MODEL, all_data=all_data)
-                sd_results[f] = {"accuracy": acc, "confusion_matrix": cm}
-                accs.append(acc)
-                print(f"{f} → {acc:.4f}")
+                subj_results = run_subject_dependent(f"{DATA_DIR}/{f}", MODEL, all_data=all_data)
+
+                sd_results[f] = subj_results
+
+                print(f"{f} → {subj_results['accuracy']:.4f}")
 
             np.save(f"{save_dir}/{CONDITION}_sd.npy", sd_results)
 

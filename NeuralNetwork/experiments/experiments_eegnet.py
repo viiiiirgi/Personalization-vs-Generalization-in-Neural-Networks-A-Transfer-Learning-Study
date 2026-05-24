@@ -9,7 +9,6 @@ from utils.train_utils import (
     train_model,
     predict_model,
     compute_statistics,
-    augment_eeg,
     subsample_data
 )
 import gc
@@ -19,6 +18,13 @@ import torch
 EPOCHS_PRETRAIN = 20
 EPOCHS = 30
 BATCH_SIZE = 64
+
+USE_PSEUDO_TRAIN = True
+USE_PSEUDO_TEST = False
+
+DOWNSAMPLE_MODE = None # None or "match_sd" or "fixed"
+
+FIXED_TRIALS = 1000
 
 
 # train and test on the same subject
@@ -34,9 +40,6 @@ def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
     X = data["X"].astype(np.float32)
     y = np.vectorize({1:0,3:1,5:2}.get)(data["y"]).astype(np.int64)
     X = X[..., np.newaxis] #X=EEG data (trials x channel x time), y=labeles
-
-    chans = X.shape[1]
-    samples = X.shape[2]
 
     accs = [] #accuracy per run
     cm_total = np.zeros((3,3)) #confusion matrices
@@ -54,32 +57,30 @@ def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
                 X, y, test_size=0.3, random_state=seed
             )
 
-        # normalize training data normally
-        X_train_n, _ = normalize_train_test(X_train, X_train)
-        _, X_test_n = normalize_train_test(X_test, X_test)
+        # normalization
+        X_train_n, X_test_n = normalize_train_test(X_train, X_test)
         
         # split TRAIN into train/val BEFORE pseudo-trials
         X_tr, X_val, y_tr, y_val = train_test_split(
             X_train_n, y_train, test_size=0.2, stratify=y_train, random_state=seed
         )
 
-        # create pseudo-trials separately (averages groups of trials reducing noise)
-        #X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
-        #X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
-        #X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
+        if USE_PSEUDO_TRAIN:
+            X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
+            X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
+        else:
+            #no pseudo trials on train
+            X_tr_p, y_tr_p = X_tr, y_tr
+            X_val_p, y_val_p = X_val, y_val
 
-        # NO pseudo-trials → use raw data
-        X_tr_p, y_tr_p = X_tr, y_tr
-        X_val_p, y_val_p = X_val, y_val
-        X_test_p, y_test_p = X_test_n, y_test
-
-        #data augmentation
-        #X_tr_aug = augment_eeg(X_tr)
-        #X_tr_p = np.concatenate([X_tr, X_tr_aug])
-        #y_tr_p = np.concatenate([y_tr, y_tr])
+        if USE_PSEUDO_TEST:
+            X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
+        else:
+            #no pseudo trials on test
+            X_test_p, y_test_p = X_test_n, y_test   
 
         # creates the eegnet, the TCN or the CfC
-        model = build_model(model_name, chans, samples)
+        model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2])
 
         #Early stopping: stops if validation loss doesn't improve
         train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE, X_val=X_val_p, y_val=y_val_p)
@@ -91,14 +92,32 @@ def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
         accs.append(accuracy_score(y_test_p, preds))
         cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
-        
+        del model
+        torch.cuda.empty_cache()
+
     #final confusion matrix: normalizes per class and make percentages
     row_sums = cm_total.sum(axis=1, keepdims=True)
     row_sums[row_sums == 0] = 1
     cm_avg = cm_total / row_sums
+    per_class_acc = np.diag(cm_avg)
 
-    #final subject performance
-    return np.mean(accs), cm_avg
+    mean_acc = np.mean(accs)
+    std_acc = np.std(accs)
+    sem = std_acc / np.sqrt(len(accs))
+    ci95 = 1.96 * sem
+
+    results = {
+        "accuracy": mean_acc,
+        "std_accuracy": std_acc,
+        "ci95": ci95,
+        "confusion_matrix": cm_avg,
+        "per_class_accuracy": per_class_acc,
+        "run_accuracies": accs,
+        "n_runs": len(accs)
+    }
+
+    #return np.mean(accs), cm_avg
+    return results
 
 # train on all subjects except one, test on that one
 def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=None, sd_train_size=None):
@@ -149,42 +168,53 @@ def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=Non
             perm = np.random.permutation(len(X_train))
             X_train_s, y_train_s = X_train[perm], y_train[perm]
 
-            # normalize training data normally
-            X_train_n, _ = normalize_train_test(X_train_s, X_train_s)
-
-            # normalize test subject using its own stats
-            _, X_test_n = normalize_train_test(X_test, X_test)
+            #normalization
+            X_train_n, X_test_n = normalize_train_test(X_train_s, X_test)
 
             # split TRAIN into train/val BEFORE pseudo-trials
             X_tr, X_val, y_tr, y_val = train_test_split(
                 X_train_n, y_train_s, test_size=0.2, stratify=y_train_s, random_state=seed
             )
 
-            # create pseudo-trials separately (averages groups of trials reducing noise)
-            #X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
-            #X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
-            #X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
-            
-            # NO pseudo-trials → use raw data
-            X_tr_p, y_tr_p = X_tr, y_tr
-            X_val_p, y_val_p = X_val, y_val
-            X_test_p, y_test_p = X_test_n, y_test
 
-            #equalize dataset size: downsample
-            #target_size = min(len(X_tr), sd_train_size)
-            #X_tr, y_tr = subsample_data(X_tr, y_tr, target_size, seed)
+            if USE_PSEUDO_TRAIN:
+                X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
+                X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
+            else:
+                #no pseudo trials on train
+                X_tr_p, y_tr_p = X_tr, y_tr
+                X_val_p, y_val_p = X_val, y_val
 
-            #data augmentation
-            #X_tr_aug = augment_eeg(X_tr)
-            #X_tr_p = np.concatenate([X_tr, X_tr_aug])
-            #y_tr_p = np.concatenate([y_tr, y_tr])
+
+            if USE_PSEUDO_TEST:
+                X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
+            else:
+                #no pseudo trials on test
+                X_test_p, y_test_p = X_test_n, y_test   
+
+
+            if DOWNSAMPLE_MODE == "match_sd":
+                target_size = min(len(X_tr_p), sd_train_size)
+
+            elif DOWNSAMPLE_MODE == "fixed":
+                target_size = FIXED_TRIALS
+
+            else:
+                target_size = None
+
+            if target_size is not None:
+                X_tr_p, y_tr_p = subsample_data(
+                    X_tr_p,
+                    y_tr_p,
+                    target_size,
+                    seed
+                )
 
             # creates the eegnet, the TCN or the CfC
-            model = build_model(model_name, X_train.shape[1], X_train.shape[2])
+            model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2])
 
             #Early stopping: stops if validation loss doesn't improve
             train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE,X_val=X_val_p, y_val=y_val_p)
-            
 
             # convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
@@ -198,6 +228,7 @@ def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=Non
         row_sums = cm_total.sum(axis=1, keepdims=True)
         row_sums[row_sums == 0] = 1
         cm_avg = cm_total / row_sums
+        per_class_acc = np.diag(cm_avg)
 
         mean_acc = np.mean(accs)
         accuracies.append(mean_acc)
@@ -205,17 +236,32 @@ def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=Non
         # store per subject
         results[test_file] = {
             "accuracy": mean_acc,
-            "confusion_matrix": cm_avg
+            "confusion_matrix": cm_avg,
+            "per_class_accuracy": per_class_acc,
+            "run_accuracies": accs
         }
 
         print(f"{test_file} → {mean_acc:.4f}")
 
+        del model
+        torch.cuda.empty_cache()
+
     # group statistics across subject
-    results["group_stats"] = compute_statistics(accuracies)
+    mean_acc = np.mean(accuracies)
+    std_acc = np.std(accuracies)
+    sem = std_acc / np.sqrt(len(accuracies))
+    ci95 = 1.96 * sem
+
+    results["group_stats"] = {
+        "mean_accuracy": mean_acc,
+        "std_accuracy": std_acc,
+        "ci95": ci95,
+        "n_subjects": len(accuracies)
+    }
     return results
 
 
-def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_split=0.7, all_data=None, sd_train_size=None):
+def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_test_split=0.3, all_data=None, sd_train_size=None):
 
     results = {}
     accuracies = []
@@ -242,14 +288,14 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_spli
             try:
                 X_ft, X_test, y_ft, y_test = train_test_split(
                     X_target, y_target,
-                    test_size=fine_tune_split,
+                    test_size=fine_tune_test_split,
                     stratify=y_target,
                     random_state=seed
                 )
             except ValueError:
                 X_ft, X_test, y_ft, y_test = train_test_split(
                     X_target, y_target,
-                    test_size=fine_tune_split,
+                    test_size=fine_tune_test_split,
                     random_state=seed
                 )
 
@@ -276,57 +322,68 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_spli
             del y_train_list
             gc.collect()
 
-            # normalize pretraining separately
-            X_pretrain_n, _ = normalize_train_test(X_pretrain, X_pretrain)
+            # normalize everything using pretraining statistics
+            mean = X_pretrain.mean(axis=(0,2), keepdims=True)
+            std = X_pretrain.std(axis=(0,2), keepdims=True) + 1e-6
+            X_pretrain_n = (X_pretrain - mean) / std
+            X_ft_n = (X_ft - mean) / std
+            X_test_n = (X_test - mean) / std
 
-            # normalize target subject using only its own data
-            X_ft_n, X_test_n = normalize_train_test(X_ft, X_test)
-
-            # split TRAIN into train/val before pseudo-trials
+            # split train into train/val before pseudo-trials
             X_ft_tr, X_ft_val, y_ft_tr, y_ft_val = train_test_split(
                 X_ft_n, y_ft, test_size=0.2, stratify=y_ft, random_state=seed
             )
 
-            # Pseudo trials (averages groups of trials reducing noise) (applied to pretraining, fine-tuning and testing)
-            #X_pre_p, y_pre_p = create_pseudo_trials(X_pretrain_n, y_pretrain)
-            #X_ft_tr_p, y_ft_tr_p = create_pseudo_trials(X_ft_tr, y_ft_tr, seed=seed)
-            #X_ft_val_p, y_ft_val_p = create_pseudo_trials(X_ft_val, y_ft_val, seed=seed+1)
-            #X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
-            
-            # NO pseudo-trials training → use raw data
-            X_pre_p, y_pre_p = X_pretrain_n, y_pretrain
-            X_test_p, y_test_p = X_test_n, y_test
-
-            #downsample
-            #target_size = min(len(X_pretrain_n), sd_train_size)
-            #X_pretrain_n, y_pretrain = subsample_data(X_pretrain_n, y_pretrain, target_size, seed)
-
-            #data augmentation training
-            #X_pre_aug = augment_eeg(X_pretrain_n)
-            #X_pre_p = np.concatenate([X_pretrain_n, X_pre_aug])
-            #y_pre_p = np.concatenate([y_pretrain, y_pretrain])
-
-            # NO pseudo-trials fine-tuning
-            X_ft_tr_p, y_ft_tr_p = X_ft_tr, y_ft_tr
-            X_ft_val_p, y_ft_val_p = X_ft_val, y_ft_val
-            
-            #data augmentation fine-tuning
-            #X_ft_tr_aug = augment_eeg(X_ft_tr)
-            #X_ft_tr_p = np.concatenate([X_ft_tr, X_ft_tr_aug])
-            #y_ft_tr_p = np.concatenate([y_ft_tr, y_ft_tr])
-
-            #pretraining split
+            #pretrain split
             X_pre_tr, X_pre_val, y_pre_tr, y_pre_val = train_test_split(
-                X_pre_p, y_pre_p, test_size=0.1, stratify=y_pre_p, random_state=seed
+                X_pretrain_n,
+                y_pretrain,
+                test_size=0.1,
+                stratify=y_pretrain,
+                random_state=seed
             )
 
-            # Build model
-            model = build_model(model_name, X_pretrain.shape[1], X_pretrain.shape[2])
+            if USE_PSEUDO_TRAIN:
+                X_pre_tr_p, y_pre_tr_p = create_pseudo_trials(X_pre_tr, y_pre_tr, seed=seed)
+                X_pre_val_p, y_pre_val_p = create_pseudo_trials(X_pre_val, y_pre_val, seed=seed+1)
+                X_ft_tr_p, y_ft_tr_p = create_pseudo_trials(X_ft_tr, y_ft_tr, seed=seed+2)
+                X_ft_val_p, y_ft_val_p = create_pseudo_trials(X_ft_val, y_ft_val, seed=seed+3)
+            else:
+                #no pseudo trials on train
+                X_pre_tr_p, y_pre_tr_p = X_pre_tr, y_pre_tr
+                X_pre_val_p, y_pre_val_p = X_pre_val, y_pre_val
+                X_ft_tr_p, y_ft_tr_p = X_ft_tr, y_ft_tr
+                X_ft_val_p, y_ft_val_p = X_ft_val, y_ft_val
 
-            device = next(model.parameters()).device
+
+            if USE_PSEUDO_TEST:
+                X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+4)
+            else:
+                #no pseudo trials on test
+                X_test_p, y_test_p = X_test_n, y_test 
+
+            if DOWNSAMPLE_MODE == "match_sd":
+                target_size = min(len(X_pre_tr_p), sd_train_size)
+
+            elif DOWNSAMPLE_MODE == "fixed":
+                target_size = FIXED_TRIALS
+
+            else:
+                target_size = None
+
+            if target_size is not None:
+                X_pre_tr_p, y_pre_tr_p = subsample_data(
+                    X_pre_tr_p,
+                    y_pre_tr_p,
+                    target_size,
+                    seed
+                )
+
+            # Build model
+            model = build_model(model_name, X_pre_tr_p.shape[1], X_pre_tr_p.shape[2])
 
             #Pretraining: learn general patterns 
-            train_model(model, X_pre_p, y_pre_p, EPOCHS_PRETRAIN, BATCH_SIZE, X_val=X_pre_val, y_val=y_pre_val)
+            train_model(model, X_pre_tr_p, y_pre_tr_p, EPOCHS_PRETRAIN, BATCH_SIZE, X_val=X_pre_val_p, y_val=y_pre_val_p)
 
             # FINE-TUNING
             # freeze all layers except final FC
@@ -334,29 +391,9 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_spli
                 if "fc" not in name:
                     param.requires_grad = False
 
-            #for name, param in model.named_parameters():
-
-                # Freeze early temporal filters
-            #    if "conv1" in name:
-            #        param.requires_grad = False
-
-                # Freeze first spatial filters
-            #    elif "depthwise" in name:
-            #        param.requires_grad = False
-
-                # Allow adaptation here 
-            #    elif "sep_depthwise" in name:
-            #        param.requires_grad = True
-
-            #    elif "sep_pointwise" in name:
-            #        param.requires_grad = True
-
-            #    elif "fc" in name:
-            #        param.requires_grad = True
 
             # new optimizer (only trainable params)
             optimizer = torch.optim.Adam( filter(lambda p: p.requires_grad, model.parameters()), lr=5e-4)
-            criterion = torch.nn.CrossEntropyLoss()
 
             train_model(
                 model, 
@@ -367,7 +404,6 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_spli
             )
 
             
-
             #test convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
 
@@ -384,18 +420,31 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_spli
         row_sums = cm_total.sum(axis=1, keepdims=True)
         row_sums[row_sums == 0] = 1
         cm_avg = cm_total / row_sums
+        per_class_acc = np.diag(cm_avg)
 
         mean_acc = np.mean(accs)
         accuracies.append(mean_acc)
-        
+
         # store per subject
         results[test_file] = {
             "accuracy": mean_acc,
-            "confusion_matrix": cm_avg
+            "confusion_matrix": cm_avg,
+            "per_class_accuracy": per_class_acc,
+            "run_accuracies": accs
         }
 
         print(f"{test_file} → {mean_acc:.4f}")
         
-    #group statistics across subject
-    results["group_stats"] = compute_statistics(accuracies)
+    mean_acc = np.mean(accuracies)
+    std_acc = np.std(accuracies)
+    sem = std_acc / np.sqrt(len(accuracies))
+    ci95 = 1.96 * sem
+
+    results["group_stats"] = {
+        "mean_accuracy": mean_acc,
+        "std_accuracy": std_acc,
+        "ci95": ci95,
+        "n_subjects": len(accuracies)
+    }
+
     return results
