@@ -10,23 +10,22 @@ class EEGNet(nn.Module):
         F2 = F1 * D
         kernLength = max(kernLength, Samples // 8)
 
-        ## Block 1 Temporal and spatial filtering
+        ## Block 1 Temporal and spatial filtering CONV2D
         # (1st layer) learns temporal patterns (finds frequencies that are relevant)
         self.conv1 = nn.Conv2d(1, F1, (1, kernLength), padding=(0, kernLength // 2), bias=False)
 
         self.bn1 = nn.BatchNorm2d(F1) #normalizes the data
 
-        # (2nd layer) learns spatial patterns across electrodes. Each temporal filter gets its own spatial filter. (which parts of the brain are communicating)
+        # (2nd layer) learns spatial patterns across electrodes. #DEPTHWISECONV2D
+        #  Each temporal filter gets its own spatial filter. (which parts of the brain are communicating)
         self.depthwise = nn.Conv2d(F1, F2, (Chans, 1), groups=F1, bias=False)
-        self.bn2 = nn.BatchNorm2d(F1 * D)
+        self.bn2 = nn.BatchNorm2d(F2)
 
         self.pool1 = nn.AvgPool2d((1, 4)) # downsamples the data, keeping the important features while reducing noise and computational load
         self.dropout1 = nn.Dropout(dropoutRate) # prevents overfitting: randomly disables neurons
 
-        # Block 2
-        #separable convolution
-        #self.sep_conv = nn.Conv2d(F2, F2, (1, 16), padding=(0, kernLength//2), bias=False)
-
+        # Block 2 SEPARABLECONV2D
+        #separable convolution (depthwise temporal filtering and then pointwise mixing)
         self.sep_depthwise = nn.Conv2d(F2, F2, (1, 16), groups=F2, padding=(0, kernLength // 2), bias=False)# Per channel temporal filtering: applies filter independently to each channel (no mix information between channels)
         self.sep_pointwise = nn.Conv2d(F2, F2, (1, 1), bias=False) # mixes channels together and combines features
         self.bn3 = nn.BatchNorm2d(F2)
