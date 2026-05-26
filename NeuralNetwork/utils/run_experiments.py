@@ -85,8 +85,9 @@ def main():
                     for ft_percent in FINE_TUNE_PERCENTS:
                         config_ft = config.copy()
                         config_ft["fine_tune_percent"] = ft_percent
+                        absolute_dataset_percent = int(round(ft_percent * 70.0))
 
-                        ft_dir = os.path.join(save_dir, f"FT_{int(ft_percent * 100)}")
+                        ft_dir = os.path.join(save_dir, f"FT_{absolute_dataset_percent}")
                         os.makedirs(ft_dir, exist_ok=True)
 
                         tl_results = run_transfer_learning(
@@ -97,6 +98,10 @@ def main():
                             all_data=all_data,
                             sd_train_size=sd_train_size
                         )
+
+                        if ft_percent == 1.0:
+                            np.save(os.path.join(save_dir, f"{CONDITION}_tl.npy"),tl_results)
+                        
                         np.save(os.path.join(ft_dir, f"{CONDITION}_tl.npy"), tl_results)
                 
                 else: 

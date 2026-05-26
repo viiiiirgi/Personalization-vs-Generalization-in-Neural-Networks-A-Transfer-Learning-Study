@@ -264,6 +264,10 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
             accs.append(accuracy_score(y_test_p, preds))
             cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
+            del model
+            torch.cuda.empty_cache()
+            gc.collect()
+
 
         #final confusion matrix: normalizes per class and make percentages
         row_sums = cm_total.sum(axis=1, keepdims=True)
@@ -284,9 +288,6 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
 
         print(f"{test_file} → {mean_acc:.4f}")
 
-        del model
-        torch.cuda.empty_cache()
-
     # group statistics across subject
     #results["group_stats"] = compute_statistics(accuracies)
     mean_acc = np.mean(accuracies)
@@ -303,7 +304,7 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
     return results
 
 
-def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, fine_tune_test_split=0.3, all_data=None, sd_train_size=None):
+def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target_test_split=0.3, all_data=None, sd_train_size=None):
 
     use_pseudo_train = config["use_pseudo_train"]
     use_pseudo_test = config["use_pseudo_test"]
@@ -335,28 +336,17 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, fine_t
             try:
                 X_ft, X_test, y_ft, y_test = train_test_split(
                     X_target, y_target,
-                    test_size=fine_tune_test_split,
+                    test_size=target_test_split,
                     stratify=y_target,
                     random_state=seed
                 )
             except ValueError:
                 X_ft, X_test, y_ft, y_test = train_test_split(
                     X_target, y_target,
-                    test_size=fine_tune_test_split,
+                    test_size=target_test_split,
                     random_state=seed
                 )
 
-            fine_tune_percent = config.get("fine_tune_percent", 1.0)
-
-            if fine_tune_percent < 1.0:
-
-                X_ft, _, y_ft, _ = train_test_split(
-                    X_ft,
-                    y_ft,
-                    train_size=fine_tune_percent,
-                    stratify=y_ft,
-                    random_state=seed
-                )
 
             # Build pretraining dataset (concatenate all other subjects)
             X_train_list, y_train_list = [], []
@@ -382,18 +372,29 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, fine_t
             gc.collect()
 
             # normalize everything using pretraining statistics
-            #X_pretrain_n, X_ft_n = normalize_train_test(X_pretrain, X_ft)
-            #_, X_test_n = normalize_train_test(X_pretrain, X_test)
             mean = X_pretrain.mean(axis=(0,2), keepdims=True)
             std = X_pretrain.std(axis=(0,2), keepdims=True) + 1e-6
             X_pretrain_n = (X_pretrain - mean) / std
             X_ft_n = (X_ft - mean) / std
             X_test_n = (X_test - mean) / std
 
-            # split train into train/val before pseudo-trials
-            X_ft_tr, X_ft_val, y_ft_tr, y_ft_val = train_test_split(
-                X_ft_n, y_ft, test_size=0.2, stratify=y_ft, random_state=seed
+            # split fine-tune pool into train+val
+            X_ft_train_pool, X_ft_val, y_ft_train_pool, y_ft_val  = train_test_split(
+                X_ft_n, y_ft,
+                test_size=0.2, 
+                stratify=y_ft,
+                random_state=seed
             )
+
+            # select percentage from training pool
+            fine_tune_percent = config.get("fine_tune_percent", 1.0)
+
+            n_ft = int(len(X_ft_train_pool) * fine_tune_percent)
+            perm = np.random.permutation(len(X_ft_train_pool))
+            idx = perm[:n_ft]
+
+            X_ft_tr = X_ft_train_pool[idx]
+            y_ft_tr = y_ft_train_pool[idx]
 
             #pretrain split
             X_pre_tr, X_pre_val, y_pre_tr, y_pre_val = train_test_split(
