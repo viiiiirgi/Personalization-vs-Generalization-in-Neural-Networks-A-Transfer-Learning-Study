@@ -19,16 +19,52 @@ EPOCHS_PRETRAIN = 20
 EPOCHS = 30
 BATCH_SIZE = 64
 
-USE_PSEUDO_TRAIN = True
-USE_PSEUDO_TEST = False
+EXPERIMENTS = {
 
-DOWNSAMPLE_MODE = None # None or "match_sd" or "fixed"
+    "AllData_NoPseudo": {
+        "use_pseudo_train": False,
+        "use_pseudo_test": False,
+        "downsample_mode": None,
+        "fixed_trials": None,
+    },
 
-FIXED_TRIALS = 1000
+    "AllData_PseudoTrainAndTest": {
+        "use_pseudo_train": True,
+        "use_pseudo_test": True,
+        "downsample_mode": None,
+        "fixed_trials": None,
+    },
+
+    "AllData_PseudoTrainOnly": {
+        "use_pseudo_train": True,
+        "use_pseudo_test": False,
+        "downsample_mode": None,
+        "fixed_trials": None,
+    },
+
+    "Downsample_1000_NoPseudo": {
+        "use_pseudo_train": False,
+        "use_pseudo_test": False,
+        "downsample_mode": "fixed",
+        "fixed_trials": 1000,
+    },
+
+    "Downsample_MinSubject_NoPseudo": {
+        "use_pseudo_train": False,
+        "use_pseudo_test": False,
+        "downsample_mode": "match_sd",
+        "fixed_trials": None,
+    }
+}
+
+FINE_TUNE_PERCENTS = [0.1, 0.25, 0.5, 0.75, 1.0]
 
 
 # train and test on the same subject
-def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
+def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None):
+
+    use_pseudo_train = config["use_pseudo_train"]
+    use_pseudo_test = config["use_pseudo_test"]
 
     if all_data is not None:
         # extract filename only (because keys are filenames, not full paths)
@@ -65,7 +101,7 @@ def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
             X_train_n, y_train, test_size=0.2, stratify=y_train, random_state=seed
         )
 
-        if USE_PSEUDO_TRAIN:
+        if use_pseudo_train:
             X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
             X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
         else:
@@ -73,7 +109,7 @@ def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
             X_tr_p, y_tr_p = X_tr, y_tr
             X_val_p, y_val_p = X_val, y_val
 
-        if USE_PSEUDO_TEST:
+        if use_pseudo_test:
             X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
         else:
             #no pseudo trials on test
@@ -120,7 +156,12 @@ def run_subject_dependent(file, model_name, n_runs=10, all_data=None):
     return results
 
 # train on all subjects except one, test on that one
-def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=None, sd_train_size=None):
+def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_data=None, sd_train_size=None):
+
+    use_pseudo_train = config["use_pseudo_train"]
+    use_pseudo_test = config["use_pseudo_test"]
+    downsample_mode = config["downsample_mode"]
+    fixed_trials = config["fixed_trials"]
 
     results = {}
     accuracies = []
@@ -177,7 +218,7 @@ def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=Non
             )
 
 
-            if USE_PSEUDO_TRAIN:
+            if use_pseudo_train:
                 X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
                 X_val_p, y_val_p = create_pseudo_trials(X_val, y_val, seed=seed+1)
             else:
@@ -186,18 +227,18 @@ def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=Non
                 X_val_p, y_val_p = X_val, y_val
 
 
-            if USE_PSEUDO_TEST:
+            if use_pseudo_test:
                 X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+2)
             else:
                 #no pseudo trials on test
                 X_test_p, y_test_p = X_test_n, y_test   
 
 
-            if DOWNSAMPLE_MODE == "match_sd":
+            if downsample_mode == "match_sd":
                 target_size = min(len(X_tr_p), sd_train_size)
 
-            elif DOWNSAMPLE_MODE == "fixed":
-                target_size = FIXED_TRIALS
+            elif downsample_mode == "fixed":
+                target_size = fixed_trials
 
             else:
                 target_size = None
@@ -247,6 +288,7 @@ def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=Non
         torch.cuda.empty_cache()
 
     # group statistics across subject
+    #results["group_stats"] = compute_statistics(accuracies)
     mean_acc = np.mean(accuracies)
     std_acc = np.std(accuracies)
     sem = std_acc / np.sqrt(len(accuracies))
@@ -261,7 +303,12 @@ def run_subject_independent(files, model_name, data_dir, n_runs=10, all_data=Non
     return results
 
 
-def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_test_split=0.3, all_data=None, sd_train_size=None):
+def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, fine_tune_test_split=0.3, all_data=None, sd_train_size=None):
+
+    use_pseudo_train = config["use_pseudo_train"]
+    use_pseudo_test = config["use_pseudo_test"]
+    downsample_mode = config["downsample_mode"]
+    fixed_trials = config["fixed_trials"]
 
     results = {}
     accuracies = []
@@ -299,6 +346,18 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_test
                     random_state=seed
                 )
 
+            fine_tune_percent = config.get("fine_tune_percent", 1.0)
+
+            if fine_tune_percent < 1.0:
+
+                X_ft, _, y_ft, _ = train_test_split(
+                    X_ft,
+                    y_ft,
+                    train_size=fine_tune_percent,
+                    stratify=y_ft,
+                    random_state=seed
+                )
+
             # Build pretraining dataset (concatenate all other subjects)
             X_train_list, y_train_list = [], []
 
@@ -323,6 +382,8 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_test
             gc.collect()
 
             # normalize everything using pretraining statistics
+            #X_pretrain_n, X_ft_n = normalize_train_test(X_pretrain, X_ft)
+            #_, X_test_n = normalize_train_test(X_pretrain, X_test)
             mean = X_pretrain.mean(axis=(0,2), keepdims=True)
             std = X_pretrain.std(axis=(0,2), keepdims=True) + 1e-6
             X_pretrain_n = (X_pretrain - mean) / std
@@ -343,7 +404,7 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_test
                 random_state=seed
             )
 
-            if USE_PSEUDO_TRAIN:
+            if use_pseudo_train:
                 X_pre_tr_p, y_pre_tr_p = create_pseudo_trials(X_pre_tr, y_pre_tr, seed=seed)
                 X_pre_val_p, y_pre_val_p = create_pseudo_trials(X_pre_val, y_pre_val, seed=seed+1)
                 X_ft_tr_p, y_ft_tr_p = create_pseudo_trials(X_ft_tr, y_ft_tr, seed=seed+2)
@@ -356,17 +417,17 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_test
                 X_ft_val_p, y_ft_val_p = X_ft_val, y_ft_val
 
 
-            if USE_PSEUDO_TEST:
+            if use_pseudo_test:
                 X_test_p, y_test_p = create_pseudo_trials(X_test_n, y_test, seed=seed+4)
             else:
                 #no pseudo trials on test
                 X_test_p, y_test_p = X_test_n, y_test 
 
-            if DOWNSAMPLE_MODE == "match_sd":
+            if downsample_mode == "match_sd":
                 target_size = min(len(X_pre_tr_p), sd_train_size)
 
-            elif DOWNSAMPLE_MODE == "fixed":
-                target_size = FIXED_TRIALS
+            elif downsample_mode == "fixed":
+                target_size = fixed_trials
 
             else:
                 target_size = None
@@ -435,6 +496,9 @@ def run_transfer_learning(files, model_name, data_dir, n_runs=10, fine_tune_test
 
         print(f"{test_file} → {mean_acc:.4f}")
         
+    #group statistics across subject
+    #results["group_stats"] = compute_statistics(accuracies)
+
     mean_acc = np.mean(accuracies)
     std_acc = np.std(accuracies)
     sem = std_acc / np.sqrt(len(accuracies))
