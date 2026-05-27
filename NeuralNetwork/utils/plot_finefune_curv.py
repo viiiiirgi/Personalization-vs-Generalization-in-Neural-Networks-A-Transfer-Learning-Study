@@ -8,20 +8,25 @@ RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 MODEL = "eegnet"
 EXPERIMENT = "AllData_NoPseudo"
-CONDITION = "SENSORY"
+CONDITION = "BSL"
 
 FT_PERCENTS = [10, 25, 50, 75, 100]
 
 means = []
 cis = []
+x_labels = []
 
 for p in FT_PERCENTS:
+
+    fraction = p / 100.0
+    absolute_dataset_percent = int(round(fraction * 70.0))
+    x_labels.append(absolute_dataset_percent)
 
     file = os.path.join(
         RESULTS_DIR,
         MODEL,
         EXPERIMENT,
-        f"FT_{p}",
+        f"FT_{absolute_dataset_percent}",
         f"{CONDITION}_tl.npy"
     )
 
