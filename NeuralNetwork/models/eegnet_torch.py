@@ -4,11 +4,10 @@ import torch.nn.functional as F
 
 
 class EEGNet(nn.Module):
-    def __init__(self, nb_classes, Chans, Samples, dropoutRate=0.5, kernLength=16, F1=4, D=2):
+    def __init__(self, nb_classes, Chans, Samples, dropoutRate=0.5, kernLength=64, F1=4, D=2):
         super(EEGNet, self).__init__()
 
         F2 = F1 * D
-        kernLength = max(kernLength, Samples // 8)
 
         ## Block 1 Temporal and spatial filtering CONV2D
         # (1st layer) learns temporal patterns (finds frequencies that are relevant)
