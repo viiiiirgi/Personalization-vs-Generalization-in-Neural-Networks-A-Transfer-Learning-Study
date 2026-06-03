@@ -84,9 +84,9 @@ def compute_sd_train_size(files, all_data, seed=0):
 
     return min(sizes) 
 
-def build_model(model_name, chans, samples):
+def build_model(model_name, chans, samples, dropout=0.5):
     if model_name == "eegnet":
-        model = EEGNet(nb_classes=3, Chans=chans, Samples=samples)
+        model = EEGNet(nb_classes=3, Chans=chans, Samples=samples, dropoutRate=dropout)
     elif model_name == "tcn":
         from models.tcn import TCN
         model = TCN(nb_classes=3, Chans=chans, Samples=samples)

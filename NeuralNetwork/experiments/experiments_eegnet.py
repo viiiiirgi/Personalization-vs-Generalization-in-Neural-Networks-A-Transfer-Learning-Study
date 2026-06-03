@@ -116,7 +116,7 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None):
             X_test_p, y_test_p = X_test_n, y_test   
 
         # creates the eegnet, the TCN or the CfC
-        model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2])
+        model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2], dropout=0.5)
 
         #Early stopping: stops if validation loss doesn't improve
         train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE, X_val=X_val_p, y_val=y_val_p)
@@ -252,7 +252,7 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
                 )
 
             # creates the eegnet, the TCN or the CfC
-            model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2])
+            model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2], dropout=0.25)
 
             #Early stopping: stops if validation loss doesn't improve
             train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE,X_val=X_val_p, y_val=y_val_p)
@@ -442,7 +442,7 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
                 )
 
             # Build model
-            model = build_model(model_name, X_pre_tr_p.shape[1], X_pre_tr_p.shape[2])
+            model = build_model(model_name, X_pre_tr_p.shape[1], X_pre_tr_p.shape[2], dropout=0.25)
 
             #Pretraining: learn general patterns 
             train_model(model, X_pre_tr_p, y_pre_tr_p, EPOCHS_PRETRAIN, BATCH_SIZE, X_val=X_pre_val_p, y_val=y_pre_val_p)
