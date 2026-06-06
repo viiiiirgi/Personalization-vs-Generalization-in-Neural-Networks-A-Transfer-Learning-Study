@@ -18,8 +18,8 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 MODEL = "eegnet"   # Options: "eegnet", "tcn", "cfc" 
-MODE = "ALL"       # Runs "SD", "SI", and "TL" sequentially
-CONDITIONS = ["BSL", "DELAY", "SENSORY"]
+MODE = "SI"       # Runs "SD", "SI", and "TL" sequentially
+CONDITIONS = ["BSL", "DELAY", "SENSORY"] #["BSL", "DELAY", "SENSORY"]
 
 def main():
     for CONDITION in CONDITIONS:
@@ -35,6 +35,24 @@ def main():
             f: np.load(os.path.join(DATA_DIR, f), allow_pickle=True).item()
             for f in files
         }
+
+        first_subject = next(iter(all_data.values()))
+
+        print("\nDATASET INFORMATION")
+        print("X shape:", first_subject["X"].shape)
+
+        if "channels" in first_subject:
+            print("Channel names:")
+            print(first_subject["channels"])
+
+        if "ch_names" in first_subject:
+            print("Channel names:")
+            print(first_subject["ch_names"])
+
+        print()
+        print(first_subject.keys())
+        print("Number of channels:", first_subject["X"].shape[1])
+        print("Number of samples:", first_subject["X"].shape[2])
 
         sd_train_size = compute_sd_train_size(files, all_data)
         print("SD_TRAIN_SIZE:", sd_train_size)

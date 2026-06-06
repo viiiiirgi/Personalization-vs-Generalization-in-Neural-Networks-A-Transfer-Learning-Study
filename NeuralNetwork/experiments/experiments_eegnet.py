@@ -15,6 +15,12 @@ import gc
 import os
 import torch
 
+try:
+    from utils.feature_viz import export_model_visualizations, subject_viz_prefix
+except ImportError:
+    export_model_visualizations = None
+    subject_viz_prefix = lambda f: f.replace(".npy", "").split("_", 1)[-1]
+
 EPOCHS_PRETRAIN = 20
 EPOCHS = 30
 BATCH_SIZE = 64
@@ -22,6 +28,7 @@ BATCH_SIZE = 64
 EXPERIMENTS = {
 
     "AllData_NoPseudo": {
+        "experiment": "AllData_NoPseudo",
         "use_pseudo_train": False,
         "use_pseudo_test": False,
         "downsample_mode": None,
@@ -29,6 +36,7 @@ EXPERIMENTS = {
     },
 
     "AllData_PseudoTrainAndTest": {
+        "experiment": "AllData_PseudoTrainAndTest",
         "use_pseudo_train": True,
         "use_pseudo_test": True,
         "downsample_mode": None,
@@ -36,6 +44,7 @@ EXPERIMENTS = {
     },
 
     "AllData_PseudoTrainOnly": {
+        "experiment": "AllData_PseudoTrainOnly",
         "use_pseudo_train": True,
         "use_pseudo_test": False,
         "downsample_mode": None,
@@ -43,6 +52,7 @@ EXPERIMENTS = {
     },
 
     "Downsample_1000_NoPseudo": {
+        "experiment": "Downsample_1000_NoPseudo",
         "use_pseudo_train": False,
         "use_pseudo_test": False,
         "downsample_mode": "fixed",
@@ -50,6 +60,7 @@ EXPERIMENTS = {
     },
 
     "Downsample_MinSubject_NoPseudo": {
+        "experiment": "Downsample_MinSubject_NoPseudo",
         "use_pseudo_train": False,
         "use_pseudo_test": False,
         "downsample_mode": "match_sd",
@@ -61,10 +72,12 @@ FINE_TUNE_PERCENTS = [0.1, 0.25, 0.5, 0.75, 1.0]
 
 
 # train and test on the same subject
-def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None):
+def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None,
+                          viz_dir=None, viz_seed=0):
 
     use_pseudo_train = config["use_pseudo_train"]
     use_pseudo_test = config["use_pseudo_test"]
+    experiment = config["experiment"]
 
     if all_data is not None:
         # extract filename only (because keys are filenames, not full paths)
@@ -79,6 +92,7 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None):
 
     accs = [] #accuracy per run
     cm_total = np.zeros((3,3)) #confusion matrices
+    best_acc= -1
 
     for seed in range(n_runs):
         set_seed(seed)
@@ -124,8 +138,28 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None):
         # convert probabilities into class labeles
         preds = predict_model(model, X_test_p)
 
+        # optional: save feature plots at seed 0 (does not change accuracy)
+        if viz_dir is not None and seed == viz_seed and export_model_visualizations is not None:
+            subj_prefix = subject_viz_prefix(os.path.basename(file))
+            export_model_visualizations(
+                model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_sd"
+            )
+
         #store results across runs
-        accs.append(accuracy_score(y_test_p, preds))
+        acc = accuracy_score(y_test_p, preds)
+        accs.append(acc)
+
+        #save best model
+        if seed == 0 or acc > best_acc:
+            best_acc = acc
+
+            save_dir = os.path.join("saved_models", experiment)
+            os.makedirs(save_dir, exist_ok=True)
+
+            torch.save(
+                model.state_dict(),
+                os.path.join( save_dir, f"sd_{os.path.basename(file)}_best.pt")
+            )
         cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
         del model
@@ -156,12 +190,14 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None):
     return results
 
 # train on all subjects except one, test on that one
-def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_data=None, sd_train_size=None):
+def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_data=None, sd_train_size=None,
+                            viz_dir=None, viz_target=None, viz_seed=0):
 
     use_pseudo_train = config["use_pseudo_train"]
     use_pseudo_test = config["use_pseudo_test"]
     downsample_mode = config["downsample_mode"]
     fixed_trials = config["fixed_trials"]
+    experiment = config["experiment"]
 
     results = {}
     accuracies = []
@@ -201,6 +237,7 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
 
         accs = []
         cm_total = np.zeros((3,3))
+        best_acc=-1
 
         for seed in range(n_runs):
             set_seed(seed)
@@ -216,7 +253,6 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
             X_tr, X_val, y_tr, y_val = train_test_split(
                 X_train_n, y_train_s, test_size=0.2, stratify=y_train_s, random_state=seed
             )
-
 
             if use_pseudo_train:
                 X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
@@ -259,9 +295,35 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
 
             # convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
-            
+
+            # optional: save feature plots at seed 0 for the viz target subject
+            if (
+                viz_dir is not None
+                and seed == viz_seed
+                and viz_target is not None
+                and test_file == viz_target
+                and export_model_visualizations is not None
+            ):
+                subj_prefix = subject_viz_prefix(test_file)
+                export_model_visualizations(
+                    model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_si"
+                )
+
             #store results across runs
-            accs.append(accuracy_score(y_test_p, preds))
+            acc = accuracy_score(y_test_p, preds)
+            accs.append(acc)
+
+            if seed == 0 or acc > best_acc:
+                best_acc = acc
+
+                save_dir = os.path.join("saved_models", experiment)
+                os.makedirs(save_dir, exist_ok=True)
+
+                torch.save(
+                    model.state_dict(),
+                    os.path.join( save_dir, f"si_{os.path.basename(test_file)}_best.pt")
+                )
+
             cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
             del model
@@ -304,12 +366,14 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
     return results
 
 
-def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target_test_split=0.3, all_data=None, sd_train_size=None):
+def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target_test_split=0.3, all_data=None, sd_train_size=None,
+                          viz_dir=None, viz_target=None, viz_seed=0):
 
     use_pseudo_train = config["use_pseudo_train"]
     use_pseudo_test = config["use_pseudo_test"]
     downsample_mode = config["downsample_mode"]
     fixed_trials = config["fixed_trials"]
+    experiment = config["experiment"]
 
     results = {}
     accuracies = []
@@ -328,6 +392,7 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
 
         accs = []
         cm_total = np.zeros((3,3))
+        best_acc=-1
 
         for seed in range(n_runs):
             set_seed(seed)
@@ -469,8 +534,34 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             #test convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
 
+            # optional: save feature plots at seed 0 for the viz target subject
+            if (
+                viz_dir is not None
+                and seed == viz_seed
+                and viz_target is not None
+                and test_file == viz_target
+                and export_model_visualizations is not None
+            ):
+                subj_prefix = subject_viz_prefix(test_file)
+                export_model_visualizations(
+                    model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_tl"
+                )
+
             #store results across runs
-            accs.append(accuracy_score(y_test_p, preds))
+            acc = accuracy_score(y_test_p, preds)
+            accs.append(acc)
+
+            if seed == 0 or acc > best_acc:
+                best_acc = acc
+
+                save_dir = os.path.join("saved_models", experiment)
+                os.makedirs(save_dir, exist_ok=True)
+
+                torch.save(
+                    model.state_dict(),
+                    os.path.join( save_dir, f"tl_{os.path.basename(test_file)}_best.pt")
+                )
+
             cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
             #Cleanup

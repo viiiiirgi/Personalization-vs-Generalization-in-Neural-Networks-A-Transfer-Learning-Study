@@ -11,7 +11,7 @@ class EEGNet(nn.Module):
 
         ## Block 1 Temporal and spatial filtering CONV2D
         # (1st layer) learns temporal patterns (finds frequencies that are relevant)
-        self.conv1 = nn.Conv2d(1, F1, (1, kernLength), padding=(0, kernLength // 2), bias=False)
+        self.conv1 = nn.Conv2d(1, F1, (1, kernLength), padding="same", bias=False)
 
         self.bn1 = nn.BatchNorm2d(F1) #normalizes the data
 
@@ -25,7 +25,7 @@ class EEGNet(nn.Module):
 
         # Block 2 SEPARABLECONV2D
         #separable convolution (depthwise temporal filtering and then pointwise mixing)
-        self.sep_depthwise = nn.Conv2d(F2, F2, (1, 16), groups=F2, padding=(0, kernLength // 2), bias=False)# Per channel temporal filtering: applies filter independently to each channel (no mix information between channels)
+        self.sep_depthwise = nn.Conv2d(F2, F2, (1, 16), groups=F2, padding="same", bias=False)# Per channel temporal filtering: applies filter independently to each channel (no mix information between channels)
         self.sep_pointwise = nn.Conv2d(F2, F2, (1, 1), bias=False) # mixes channels together and combines features
         self.bn3 = nn.BatchNorm2d(F2)
 
@@ -34,7 +34,7 @@ class EEGNet(nn.Module):
 
         self.fc = nn.LazyLinear(nb_classes)
 
-    def forward(self, x):
+    def extract_features(self, x):
         # input: (batch, chans, samples, 1) → convert
         x = x.permute(0, 3, 1, 2)  # → (batch, 1, chans, samples)
 
@@ -47,16 +47,21 @@ class EEGNet(nn.Module):
         x = self.pool1(x)
         x = self.dropout1(x)
 
-        #x = self.sep_conv(x)
         x = self.sep_depthwise(x)
         x = self.sep_pointwise(x)
 
         x = self.bn3(x)
-        x = F.elu(x) 
+        x = F.elu(x)
         x = self.pool2(x)
         x = self.dropout2(x)
 
         x = torch.flatten(x, 1) # flattens the 2d feature maps into a 1d vector
+
+        return x
+
+    def forward(self, x):
+
+        x=self.extract_features(x)
         x = self.fc(x)
 
         return x 
