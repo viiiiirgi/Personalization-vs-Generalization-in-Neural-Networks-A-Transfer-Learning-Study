@@ -5,11 +5,10 @@ _LABEL_MAP = {1: 0, 3: 1, 5: 2}
 
 
 def load_subject(file: str):
-    """
-    Loads one subject .npy (dict with keys X,y) and returns:
-      X: (trials, channels, time, 1) float32
-      y: (trials,) int64 in {0,1,2} mapped from {1,3,5}
-    """
+    #Loads one subject .npy (dict with keys X,y) and returns:
+    #  X: (trials, channels, time, 1) float32
+    #  y: (trials,) int64 in {0,1,2} mapped from {1,3,5}
+
     data = np.load(file, allow_pickle=True).item()
 
     X = data["X"].astype(np.float32)  # (trials, channels, time)

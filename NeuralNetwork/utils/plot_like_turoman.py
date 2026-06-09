@@ -37,19 +37,19 @@ def load_condition_results(results_dir, condition, suffix):
     return np.load(path, allow_pickle=True).item()
 
 def subject_keys(condition_results):
-    return [k for k in condition_results.keys() if k != "group_stats"]
+    return [k for k in condition_results.keys() if k not in ["group_stats", "sustainability_stats"]]
 
 def extract_accuracy_percent(condition_results):
     keys = subject_keys(condition_results)
-    return {k: condition_results[k]["accuracy"] * 100 for k in keys}
+    return {k: condition_results[k].get("accuracy", 0) * 100 for k in keys}
 
 def load_results(experiment, suffix, condition):
     path = os.path.join(BASE_DIR, "results", "eegnet", experiment, f"{condition}_{suffix}.npy")
     return np.load(path, allow_pickle=True).item()
 
 def get_subject_accuracy_vector(results_dict):
-    keys = sorted([k for k in results_dict.keys() if k != "group_stats"])
-    return np.array([results_dict[k]["accuracy"] * 100 for k in keys])
+    keys = sorted(subject_keys(results_dict))
+    return np.array([results_dict[k].get("accuracy", 0) * 100 for k in keys])
 
 def extract_confusions(condition_results):
     keys = subject_keys(condition_results)

@@ -4,6 +4,12 @@ import torch
 from scipy.stats import ttest_1samp
 from models.eegnet_torch import EEGNet
 from sklearn.model_selection import train_test_split
+import time
+import psutil
+import os
+import subprocess
+import copy
+
 
 # fixes randomness acrosss libraries
 def set_seed(seed):
@@ -112,9 +118,28 @@ def predict_model(model, X):
 
     return preds.cpu().numpy()
 
+
+def get_gpu_power():
+    try:
+        result = subprocess.check_output([
+            "nvidia-smi",
+            "--query-gpu=power.draw",
+            "--format=csv,noheader,nounits"
+        ])
+        return float(result.decode().strip())
+    except Exception:
+        return 0.0
+
 def train_model(model, X, y, epochs, batch_size,
                 X_val=None, y_val=None,
                 lr=2e-3, optimizer=None, patience=3):
+
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+
+    start_time = time.time()
+    process = psutil.Process(os.getpid())
+    energy_log = []
 
     device = next(model.parameters()).device
 
@@ -132,12 +157,15 @@ def train_model(model, X, y, epochs, batch_size,
     if optimizer is None:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
 
-    
     criterion = torch.nn.CrossEntropyLoss()
 
     best_val_loss = float("inf")
     best_model_state = None
     patience_counter = 0
+    power_samples = []
+    if torch.cuda.is_available():
+        power_samples = [get_gpu_power()]
+    time_samples = [time.time()]
 
     for epoch in range(epochs):
 
@@ -165,7 +193,7 @@ def train_model(model, X, y, epochs, batch_size,
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                best_model_state = model.state_dict()
+                best_model_state = copy.deepcopy(model.state_dict())
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -174,7 +202,47 @@ def train_model(model, X, y, epochs, batch_size,
                 model.load_state_dict(best_model_state)
                 break
 
-    return model
+        #susteinability metrics
+        
+        time_samples.append(time.time())
+        ram_mb = process.memory_info().rss / 1024**2
+
+        if torch.cuda.is_available():
+            gpu_mem_mb = torch.cuda.max_memory_allocated() / 1024**2
+            current_power = get_gpu_power()
+            power_samples.append(current_power)
+        else:
+            gpu_mem_mb = 0
+            current_power = 0
+
+        energy_log.append({"epoch": epoch + 1, "ram_mb": ram_mb, "gpu_mem_mb": gpu_mem_mb, "gpu_power_w":current_power})
+    
+    if torch.cuda.is_available():
+        power_samples.append(get_gpu_power())
+    time_samples.append(time.time())
+
+    training_time = time.time() - start_time
+    peak_ram = max((x["ram_mb"] for x in energy_log), default=0)
+    peak_gpu = max((x["gpu_mem_mb"] for x in energy_log), default=0)
+    energy_wh = 0
+
+    for i in range(len(power_samples) - 1):
+        dt = time_samples[i+1] - time_samples[i]
+        energy_wh += power_samples[i] * dt / 3600
+
+    energy_kwh = energy_wh / 1000
+    GRID_EMISSION_FACTOR = 0.27
+    co2_kg = energy_kwh * GRID_EMISSION_FACTOR
+
+    metrics = {
+        "training_time_s": training_time,
+        "peak_ram_mb": peak_ram,
+        "peak_gpu_mb": peak_gpu,
+        "energy_kwh": energy_kwh,
+        "co2_kg": co2_kg
+    }
+
+    return model, metrics
 
 def compute_statistics(subject_accuracies):
     subject_accuracies = np.array(subject_accuracies)

@@ -8,7 +8,7 @@ RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 MODEL = "eegnet"
 EXPERIMENT = "AllData_NoPseudo"
-CONDITION = "BSL"
+CONDITION = "SENSORY" #BSL or SENSORY OR DELAY
 
 FT_PERCENTS = [10, 25, 50, 75, 100]
 

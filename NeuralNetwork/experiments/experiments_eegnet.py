@@ -72,8 +72,7 @@ FINE_TUNE_PERCENTS = [0.1, 0.25, 0.5, 0.75, 1.0]
 
 
 # train and test on the same subject
-def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None,
-                          viz_dir=None, viz_seed=0):
+def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None, viz_dir=None, viz_seed=0):
 
     use_pseudo_train = config["use_pseudo_train"]
     use_pseudo_test = config["use_pseudo_test"]
@@ -90,30 +89,25 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None,
     y = np.vectorize({1:0,3:1,5:2}.get)(data["y"]).astype(np.int64)
     X = X[..., np.newaxis] #X=EEG data (trials x channel x time), y=labeles
 
-    accs = [] #accuracy per run
+    accs = [] 
     cm_total = np.zeros((3,3)) #confusion matrices
     best_acc= -1
+    sustainability_runs = []
 
     for seed in range(n_runs):
         set_seed(seed)
 
         # random splits
         try:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.3, stratify=y, random_state=seed
-            )
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, stratify=y, random_state=seed)
         except ValueError:
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.3, random_state=seed
-            )
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=seed)
 
         # normalization
         X_train_n, X_test_n = normalize_train_test(X_train, X_test)
         
         # split TRAIN into train/val BEFORE pseudo-trials
-        X_tr, X_val, y_tr, y_val = train_test_split(
-            X_train_n, y_train, test_size=0.2, stratify=y_train, random_state=seed
-        )
+        X_tr, X_val, y_tr, y_val = train_test_split(X_train_n, y_train, test_size=0.2, stratify=y_train, random_state=seed)
 
         if use_pseudo_train:
             X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
@@ -133,21 +127,21 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None,
         model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2], dropout=0.5)
 
         #Early stopping: stops if validation loss doesn't improve
-        train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE, X_val=X_val_p, y_val=y_val_p)
+        model, metrics= train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE, X_val=X_val_p, y_val=y_val_p)
 
+        
         # convert probabilities into class labeles
         preds = predict_model(model, X_test_p)
 
         # optional: save feature plots at seed 0 (does not change accuracy)
         if viz_dir is not None and seed == viz_seed and export_model_visualizations is not None:
             subj_prefix = subject_viz_prefix(os.path.basename(file))
-            export_model_visualizations(
-                model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_sd"
-            )
+            export_model_visualizations(model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_sd")
 
         #store results across runs
         acc = accuracy_score(y_test_p, preds)
         accs.append(acc)
+        sustainability_runs.append(metrics)
 
         #save best model
         if seed == 0 or acc > best_acc:
@@ -156,14 +150,26 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None,
             save_dir = os.path.join("saved_models", experiment)
             os.makedirs(save_dir, exist_ok=True)
 
-            torch.save(
-                model.state_dict(),
-                os.path.join( save_dir, f"sd_{os.path.basename(file)}_best.pt")
-            )
+            torch.save(model.state_dict(),os.path.join( save_dir, f"sd_{os.path.basename(file)}_best.pt"))
+
         cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
         del model
         torch.cuda.empty_cache()
+
+    #average sustainibility metrics 
+    mean_metrics = {
+        "training_time_s":
+            np.mean([m["training_time_s"] for m in sustainability_runs]),
+        "peak_ram_mb":
+            np.mean([m["peak_ram_mb"] for m in sustainability_runs]),
+        "peak_gpu_mb":
+            np.mean([m["peak_gpu_mb"] for m in sustainability_runs]),
+        "energy_kwh":
+            np.mean([m["energy_kwh"] for m in sustainability_runs]),
+        "co2_kg":
+            np.mean([m["co2_kg"] for m in sustainability_runs]),
+    }
 
     #final confusion matrix: normalizes per class and make percentages
     row_sums = cm_total.sum(axis=1, keepdims=True)
@@ -186,6 +192,14 @@ def run_subject_dependent(file, model_name, config, n_runs=10, all_data=None,
         "n_runs": len(accs)
     }
 
+    results["sustainability_stats"] = {
+        "mean_training_time_s": mean_metrics["training_time_s"],
+        "mean_peak_ram_mb": mean_metrics["peak_ram_mb"],
+        "mean_peak_gpu_mb": mean_metrics["peak_gpu_mb"],
+        "mean_energy_kwh": mean_metrics["energy_kwh"],
+        "mean_co2_kg": mean_metrics["co2_kg"]
+    }
+
     #return np.mean(accs), cm_avg
     return results
 
@@ -203,6 +217,8 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
     accuracies = []
 
     for test_file in files: # leave one subject out
+
+        sustainability_runs = []
 
         # select test subject
         data = all_data[test_file]
@@ -249,10 +265,8 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
             #normalization
             X_train_n, X_test_n = normalize_train_test(X_train_s, X_test)
 
-            # split TRAIN into train/val BEFORE pseudo-trials
-            X_tr, X_val, y_tr, y_val = train_test_split(
-                X_train_n, y_train_s, test_size=0.2, stratify=y_train_s, random_state=seed
-            )
+            # split train into train/val before pseudo-trials
+            X_tr, X_val, y_tr, y_val = train_test_split(X_train_n, y_train_s, test_size=0.2, stratify=y_train_s, random_state=seed)
 
             if use_pseudo_train:
                 X_tr_p, y_tr_p = create_pseudo_trials(X_tr, y_tr, seed=seed)
@@ -280,38 +294,27 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
                 target_size = None
 
             if target_size is not None:
-                X_tr_p, y_tr_p = subsample_data(
-                    X_tr_p,
-                    y_tr_p,
-                    target_size,
-                    seed
-                )
+                X_tr_p, y_tr_p = subsample_data(X_tr_p, y_tr_p, target_size, seed)
 
             # creates the eegnet, the TCN or the CfC
             model = build_model(model_name, X_tr_p.shape[1], X_tr_p.shape[2], dropout=0.25)
 
             #Early stopping: stops if validation loss doesn't improve
-            train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE,X_val=X_val_p, y_val=y_val_p)
+            model, metrics = train_model(model, X_tr_p, y_tr_p, EPOCHS, BATCH_SIZE,X_val=X_val_p, y_val=y_val_p)
 
             # convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
 
             # optional: save feature plots at seed 0 for the viz target subject
-            if (
-                viz_dir is not None
-                and seed == viz_seed
-                and viz_target is not None
-                and test_file == viz_target
-                and export_model_visualizations is not None
-            ):
+            if (viz_dir is not None and seed == viz_seed and viz_target is not None and test_file == viz_target
+                                    and export_model_visualizations is not None):
                 subj_prefix = subject_viz_prefix(test_file)
-                export_model_visualizations(
-                    model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_si"
-                )
+                export_model_visualizations(model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_si")
 
             #store results across runs
             acc = accuracy_score(y_test_p, preds)
             accs.append(acc)
+            sustainability_runs.append(metrics)
 
             if seed == 0 or acc > best_acc:
                 best_acc = acc
@@ -319,10 +322,7 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
                 save_dir = os.path.join("saved_models", experiment)
                 os.makedirs(save_dir, exist_ok=True)
 
-                torch.save(
-                    model.state_dict(),
-                    os.path.join( save_dir, f"si_{os.path.basename(test_file)}_best.pt")
-                )
+                torch.save(model.state_dict(), os.path.join( save_dir, f"si_{os.path.basename(test_file)}_best.pt"))
 
             cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
@@ -330,6 +330,19 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
             torch.cuda.empty_cache()
             gc.collect()
 
+        #mean sustainability metrics
+        mean_metrics = {
+            "training_time_s":
+                np.mean([m["training_time_s"] for m in sustainability_runs]),
+            "peak_ram_mb":
+                np.mean([m["peak_ram_mb"] for m in sustainability_runs]),
+            "peak_gpu_mb":
+                np.mean([m["peak_gpu_mb"] for m in sustainability_runs]),
+            "energy_kwh":
+                np.mean([m["energy_kwh"] for m in sustainability_runs]),
+            "co2_kg":
+                np.mean([m["co2_kg"] for m in sustainability_runs]),
+        }
 
         #final confusion matrix: normalizes per class and make percentages
         row_sums = cm_total.sum(axis=1, keepdims=True)
@@ -345,13 +358,13 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
             "accuracy": mean_acc,
             "confusion_matrix": cm_avg,
             "per_class_accuracy": per_class_acc,
-            "run_accuracies": accs
+            "run_accuracies": accs,
+            "sustainability": mean_metrics
         }
 
         print(f"{test_file} → {mean_acc:.4f}")
 
     # group statistics across subject
-    #results["group_stats"] = compute_statistics(accuracies)
     mean_acc = np.mean(accuracies)
     std_acc = np.std(accuracies)
     sem = std_acc / np.sqrt(len(accuracies))
@@ -363,6 +376,41 @@ def run_subject_independent(files, model_name, data_dir, config, n_runs=10, all_
         "ci95": ci95,
         "n_subjects": len(accuracies)
     }
+
+    all_training_times = [
+        results[s]["sustainability"]["training_time_s"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_energy = [
+        results[s]["sustainability"]["energy_kwh"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_co2 = [
+        results[s]["sustainability"]["co2_kg"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_ram = [
+        results[s]["sustainability"]["peak_ram_mb"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_gpu = [
+        results[s]["sustainability"]["peak_gpu_mb"]
+        for s in results
+        if s != "group_stats"
+    ]
+
+    results["sustainability_stats"] = {
+        "mean_training_time_s": np.mean(all_training_times),
+        "mean_peak_ram_mb": np.mean(all_ram),
+        "mean_peak_gpu_mb": np.mean(all_gpu),
+        "mean_energy_kwh": np.mean(all_energy),
+        "mean_co2_kg": np.mean(all_co2)
+    }
+
     return results
 
 
@@ -382,6 +430,8 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
 
         print(f"\n--- Transfer Learning on {test_file} ---")
 
+        sustainability_runs = []
+
         # Load target subject
         data = all_data[test_file]
         X = data["X"].astype(np.float32)
@@ -399,18 +449,9 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
 
             # Split target subject in fine-tune (to adapt the model also to this subject) + test (for evaluation)
             try:
-                X_ft, X_test, y_ft, y_test = train_test_split(
-                    X_target, y_target,
-                    test_size=target_test_split,
-                    stratify=y_target,
-                    random_state=seed
-                )
+                X_ft, X_test, y_ft, y_test = train_test_split(X_target, y_target, test_size=target_test_split, stratify=y_target, random_state=seed)
             except ValueError:
-                X_ft, X_test, y_ft, y_test = train_test_split(
-                    X_target, y_target,
-                    test_size=target_test_split,
-                    random_state=seed
-                )
+                X_ft, X_test, y_ft, y_test = train_test_split(X_target, y_target, test_size=target_test_split, random_state=seed)
 
 
             # Build pretraining dataset (concatenate all other subjects)
@@ -419,6 +460,7 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             for f in files:
                 if f == test_file:
                     continue
+
                 data = all_data[f]
                 X = data["X"].astype(np.float32)
                 y = np.vectorize({1:0,3:1,5:2}.get)(data["y"]).astype(np.int64)
@@ -444,12 +486,7 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             X_test_n = (X_test - mean) / std
 
             # split fine-tune pool into train+val
-            X_ft_train_pool, X_ft_val, y_ft_train_pool, y_ft_val  = train_test_split(
-                X_ft_n, y_ft,
-                test_size=0.2, 
-                stratify=y_ft,
-                random_state=seed
-            )
+            X_ft_train_pool, X_ft_val, y_ft_train_pool, y_ft_val  = train_test_split(X_ft_n, y_ft, test_size=0.2, stratify=y_ft, random_state=seed)
 
             # select percentage from training pool
             fine_tune_percent = config.get("fine_tune_percent", 1.0)
@@ -462,13 +499,7 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             y_ft_tr = y_ft_train_pool[idx]
 
             #pretrain split
-            X_pre_tr, X_pre_val, y_pre_tr, y_pre_val = train_test_split(
-                X_pretrain_n,
-                y_pretrain,
-                test_size=0.1,
-                stratify=y_pretrain,
-                random_state=seed
-            )
+            X_pre_tr, X_pre_val, y_pre_tr, y_pre_val = train_test_split(X_pretrain_n, y_pretrain, test_size=0.1, stratify=y_pretrain, random_state=seed)
 
             if use_pseudo_train:
                 X_pre_tr_p, y_pre_tr_p = create_pseudo_trials(X_pre_tr, y_pre_tr, seed=seed)
@@ -489,6 +520,7 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
                 #no pseudo trials on test
                 X_test_p, y_test_p = X_test_n, y_test 
 
+
             if downsample_mode == "match_sd":
                 target_size = min(len(X_pre_tr_p), sd_train_size)
 
@@ -498,19 +530,15 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             else:
                 target_size = None
 
+
             if target_size is not None:
-                X_pre_tr_p, y_pre_tr_p = subsample_data(
-                    X_pre_tr_p,
-                    y_pre_tr_p,
-                    target_size,
-                    seed
-                )
+                X_pre_tr_p, y_pre_tr_p = subsample_data( X_pre_tr_p, y_pre_tr_p, target_size, seed)
 
             # Build model
             model = build_model(model_name, X_pre_tr_p.shape[1], X_pre_tr_p.shape[2], dropout=0.25)
 
             #Pretraining: learn general patterns 
-            train_model(model, X_pre_tr_p, y_pre_tr_p, EPOCHS_PRETRAIN, BATCH_SIZE, X_val=X_pre_val_p, y_val=y_pre_val_p)
+            model, pre_metrics = train_model(model, X_pre_tr_p, y_pre_tr_p, EPOCHS_PRETRAIN, BATCH_SIZE, X_val=X_pre_val_p, y_val=y_pre_val_p)
 
             # FINE-TUNING
             # freeze all layers except final FC
@@ -522,34 +550,35 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             # new optimizer (only trainable params)
             optimizer = torch.optim.Adam( filter(lambda p: p.requires_grad, model.parameters()), lr=5e-4)
 
-            train_model(
-                model, 
-                X_ft_tr_p, y_ft_tr_p, 
-                EPOCHS, BATCH_SIZE, 
-                X_val=X_ft_val_p, y_val=y_ft_val_p,
-                optimizer=optimizer
-            )
-
+            model, ft_metrics= train_model(model, X_ft_tr_p, y_ft_tr_p, EPOCHS, BATCH_SIZE, X_val=X_ft_val_p, y_val=y_ft_val_p, optimizer=optimizer)
             
+            #combine sustainability metrics
+            metrics = {
+                "training_time_s":
+                    pre_metrics["training_time_s"] + ft_metrics["training_time_s"],
+                "peak_ram_mb":
+                    max(pre_metrics["peak_ram_mb"],ft_metrics["peak_ram_mb"]),
+                "peak_gpu_mb":
+                    max(pre_metrics["peak_gpu_mb"],ft_metrics["peak_gpu_mb"]),
+                "energy_kwh":
+                    pre_metrics["energy_kwh"] + ft_metrics["energy_kwh"],
+                "co2_kg":
+                    pre_metrics["co2_kg"] + ft_metrics["co2_kg"]
+            }
+
             #test convert probabilities into class labeles
             preds = predict_model(model, X_test_p)
 
             # optional: save feature plots at seed 0 for the viz target subject
-            if (
-                viz_dir is not None
-                and seed == viz_seed
-                and viz_target is not None
-                and test_file == viz_target
-                and export_model_visualizations is not None
-            ):
+            if (viz_dir is not None and seed == viz_seed and viz_target is not None and test_file == viz_target 
+                                    and export_model_visualizations is not None):
                 subj_prefix = subject_viz_prefix(test_file)
-                export_model_visualizations(
-                    model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_tl"
-                )
+                export_model_visualizations(model, X_test_p, y_test_p, viz_dir, f"{subj_prefix}_tl")
 
             #store results across runs
             acc = accuracy_score(y_test_p, preds)
             accs.append(acc)
+            sustainability_runs.append(metrics)
 
             if seed == 0 or acc > best_acc:
                 best_acc = acc
@@ -557,10 +586,7 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
                 save_dir = os.path.join("saved_models", experiment)
                 os.makedirs(save_dir, exist_ok=True)
 
-                torch.save(
-                    model.state_dict(),
-                    os.path.join( save_dir, f"tl_{os.path.basename(test_file)}_best.pt")
-                )
+                torch.save(model.state_dict(), os.path.join( save_dir, f"tl_{os.path.basename(test_file)}_best.pt"))
 
             cm_total += confusion_matrix(y_test_p, preds, labels=[0,1,2])
 
@@ -568,6 +594,19 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             del model
             torch.cuda.empty_cache()
             
+        #mean sustainability metrics
+        mean_metrics = {
+            "training_time_s":
+                np.mean([m["training_time_s"] for m in sustainability_runs]),
+            "peak_ram_mb":
+                np.mean([m["peak_ram_mb"] for m in sustainability_runs]),
+            "peak_gpu_mb":
+                np.mean([m["peak_gpu_mb"] for m in sustainability_runs]),
+            "energy_kwh":
+                np.mean([m["energy_kwh"] for m in sustainability_runs]),
+            "co2_kg":
+                np.mean([m["co2_kg"] for m in sustainability_runs]),
+        }
 
         #final confusion matrix: normalizes per class and make percentages
         row_sums = cm_total.sum(axis=1, keepdims=True)
@@ -583,14 +622,14 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
             "accuracy": mean_acc,
             "confusion_matrix": cm_avg,
             "per_class_accuracy": per_class_acc,
-            "run_accuracies": accs
+            "run_accuracies": accs,
+            "sustainability": mean_metrics
         }
 
         print(f"{test_file} → {mean_acc:.4f}")
         
-    #group statistics across subject
-    #results["group_stats"] = compute_statistics(accuracies)
 
+    #group statistics across subject
     mean_acc = np.mean(accuracies)
     std_acc = np.std(accuracies)
     sem = std_acc / np.sqrt(len(accuracies))
@@ -601,6 +640,40 @@ def run_transfer_learning(files, model_name, data_dir, config, n_runs=10, target
         "std_accuracy": std_acc,
         "ci95": ci95,
         "n_subjects": len(accuracies)
+    }
+
+    all_training_times = [
+        results[s]["sustainability"]["training_time_s"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_energy = [
+        results[s]["sustainability"]["energy_kwh"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_co2 = [
+        results[s]["sustainability"]["co2_kg"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_ram = [
+        results[s]["sustainability"]["peak_ram_mb"]
+        for s in results
+        if s != "group_stats"
+    ]
+    all_gpu = [
+        results[s]["sustainability"]["peak_gpu_mb"]
+        for s in results
+        if s != "group_stats"
+    ]
+
+    results["sustainability_stats"] = {
+        "mean_training_time_s": np.mean(all_training_times),
+        "mean_peak_ram_mb": np.mean(all_ram),
+        "mean_peak_gpu_mb": np.mean(all_gpu),
+        "mean_energy_kwh": np.mean(all_energy),
+        "mean_co2_kg": np.mean(all_co2)
     }
 
     return results

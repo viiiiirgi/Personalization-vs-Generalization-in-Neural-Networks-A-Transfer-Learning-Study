@@ -18,7 +18,7 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 RESULTS_DIR = os.path.join(BASE_DIR, "results")
 
 MODEL = "eegnet"   # Options: "eegnet", "tcn", "cfc" 
-MODE = "SI"       # Runs "SD", "SI", and "TL" sequentially
+MODE = "SD"       # Runs "SD", "SI", and "TL" sequentially
 CONDITIONS = ["BSL", "DELAY", "SENSORY"] #["BSL", "DELAY", "SENSORY"]
 
 def main():
@@ -58,41 +58,28 @@ def main():
         print("SD_TRAIN_SIZE:", sd_train_size)
 
         for exp_name, config in EXPERIMENTS.items():
-            print(f"\n==============================")
             print(f"RUNNING EXPERIMENT: {exp_name}")
-            print(f"==============================")
 
             save_dir = os.path.join(RESULTS_DIR, MODEL, exp_name)
             os.makedirs(save_dir, exist_ok=True)
 
-           
             if MODE in ["SD", "ALL"]:
-                print(f"[{exp_name}] Running Subject-Dependent Pipeline...")
-                sd_results = {}
+                if exp_name != "Downsample_1000_NoPseudo" and exp_name !="Downsample_MinSubject_NoPseudo":
+                    print(f"[{exp_name}] Running Subject-Dependent Pipeline...")
+                    sd_results = {}
 
-                for f in files:
-                    subj_results = run_subject_dependent(
-                        os.path.join(DATA_DIR, f), 
-                        MODEL, 
-                        config=config, 
-                        all_data=all_data
-                    )
-                    sd_results[f] = subj_results
-                    print(f"{f} → {subj_results['accuracy']:.4f}")
+                    for f in files:
+                        subj_results = run_subject_dependent(os.path.join(DATA_DIR, f), MODEL, config=config, all_data=all_data)
+                        sd_results[f] = subj_results
+                        print(f"{f} → {subj_results['accuracy']:.4f}")
 
-                np.save(os.path.join(save_dir, f"{CONDITION}_sd.npy"), sd_results)
+                    np.save(os.path.join(save_dir, f"{CONDITION}_sd.npy"), sd_results)
+                
 
            
             if MODE in ["SI", "ALL"]:
                 print(f"[{exp_name}] Running Subject-Independent Pipeline...")
-                si_results = run_subject_independent(
-                    files, 
-                    MODEL, 
-                    DATA_DIR, 
-                    config=config, 
-                    all_data=all_data, 
-                    sd_train_size=sd_train_size
-                )
+                si_results = run_subject_independent(files, MODEL, DATA_DIR, config=config, all_data=all_data, sd_train_size=sd_train_size)
                 np.save(os.path.join(save_dir, f"{CONDITION}_si.npy"), si_results)
             
            
@@ -108,14 +95,7 @@ def main():
                         ft_dir = os.path.join(save_dir, f"FT_{absolute_dataset_percent}")
                         os.makedirs(ft_dir, exist_ok=True)
 
-                        tl_results = run_transfer_learning(
-                            files,
-                            MODEL,
-                            DATA_DIR,
-                            config=config_ft,
-                            all_data=all_data,
-                            sd_train_size=sd_train_size
-                        )
+                        tl_results = run_transfer_learning(files, MODEL, DATA_DIR, config=config_ft, all_data=all_data, sd_train_size=sd_train_size)
 
                         if ft_percent == 1.0:
                             np.save(os.path.join(save_dir, f"{CONDITION}_tl.npy"),tl_results)
@@ -123,14 +103,7 @@ def main():
                         np.save(os.path.join(ft_dir, f"{CONDITION}_tl.npy"), tl_results)
                 
                 else: 
-                    tl_results = run_transfer_learning(
-                        files,
-                        MODEL,
-                        DATA_DIR,
-                        config=config,
-                        all_data=all_data,
-                        sd_train_size=sd_train_size
-                    )
+                    tl_results = run_transfer_learning(files, MODEL, DATA_DIR, config=config, all_data=all_data, sd_train_size=sd_train_size)
                     np.save(os.path.join(save_dir, f"{CONDITION}_tl.npy"), tl_results)
 
             # Clean up GPU memory and call garbage collection after each experiment setup
