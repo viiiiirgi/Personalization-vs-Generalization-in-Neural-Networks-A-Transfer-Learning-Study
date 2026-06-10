@@ -151,7 +151,7 @@ for experiment in EXPERIMENT_LIST:
 
     plt.tight_layout(rect=[0, 0, 1, 0.93])
 
-    save_path = os.path.join(current_exp_dir, f"{CONDITION}_paradigm_sustainability.png")
+    save_path = os.path.join(current_exp_dir, f"{CONDITION}_paradigm_sustainability.pdf")
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close()
 

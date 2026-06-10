@@ -168,7 +168,7 @@ def main():
             print("Loading:", model_path)
 
             model = load_model(model_path, chans, samples, dropout)
-            base_name = (f"{experiment}_{strategy}2.png")
+            base_name = (f"{experiment}_{strategy}.pdf")
 
             plot_pca(model, X, y, os.path.join(feature_dir,base_name),f"{experiment} - {strategy.upper()}")
             plot_temporal_filters( model, os.path.join(temporal_dir, base_name))

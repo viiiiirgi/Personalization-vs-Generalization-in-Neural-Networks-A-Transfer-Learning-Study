@@ -63,7 +63,7 @@ save_path = os.path.join(
     RESULTS_DIR,
     MODEL,
     EXPERIMENT,
-    f"{CONDITION}_finetune_curve.png"
+    f"{CONDITION}_finetune_curve.pdf"
 )
 
 plt.savefig(save_path, dpi=300, bbox_inches="tight")
