@@ -17,7 +17,7 @@ if not os.path.exists(OUTPUT_DIR):
 CHANCE = 33.33
 CONDITIONS = ["BSL", "SENSORY", "DELAY"]
 CLASS_LABELS = ["Visual", "Spatial", "Verbal"]
-
+    
 mpl.rcParams.update({
     "font.size": 12,
     "axes.spines.top": False,
@@ -25,6 +25,15 @@ mpl.rcParams.update({
     "figure.dpi": 300
 })
 
+def significance_star(p):
+    if p < 0.001:
+        return "***"
+    elif p < 0.01:
+        return "**"
+    elif p < 0.05:
+        return "*"
+    else:
+        return "n.s."
 
 # Load results
 INPUT_PATH = os.path.join(OUTPUT_DIR, "turoman_results.pkl")
@@ -38,11 +47,7 @@ for cond in CONDITIONS:
     for sub in results[cond]:
         if sub == "group_stats":
             continue
-        rows.append({
-            "Condition": cond,
-            "Subject": sub,
-            "Accuracy": results[cond][sub]["accuracy"] * 100
-        })
+        rows.append({"Condition": cond, "Subject": sub, "Accuracy": results[cond][sub]["accuracy"] * 100 })
 df = pd.DataFrame(rows)
 
 
@@ -56,23 +61,19 @@ palette = {
 
 fig, ax = plt.subplots(figsize=(8, 6))
 
-vp = sns.violinplot(x="Condition", y="Accuracy", data=df, palette=palette, 
-               inner=None, cut=0, linewidth=1.2, width=0.6, ax=ax)
+vp = sns.violinplot(x="Condition", y="Accuracy", data=df, palette=palette, inner=None, cut=0, linewidth=1.2, width=0.6, ax=ax)
 for pc in vp.collections:
     pc.set_alpha(0.3)
 
-sns.stripplot(x="Condition", y="Accuracy", data=df, color="black", 
-              size=4, jitter=0.2, alpha=0.4, zorder=2, ax=ax)
+sns.stripplot(x="Condition", y="Accuracy", data=df, color="black", size=4, jitter=0.2, alpha=0.4, zorder=2, ax=ax)
 
 ax.axhline(CHANCE, linestyle="-.", color="black", linewidth=1.5, zorder=0)
 
 legend_elements = [
     Line2D([0], [0], color='black', lw=2, label='Mean accuracy'),
-    Line2D([0], [0], marker='o', color='white', markeredgecolor='black',
-           markersize=8, linestyle='None', label='Median accuracy'),
+    Line2D([0], [0], marker='o', color='white', markeredgecolor='black', markersize=8, linestyle='None', label='Median accuracy'),
     Line2D([0], [0], color='black', lw=6, alpha=0.7, label='Standard deviation'),
-    Line2D([0], [0], color='black', marker='o', linestyle='None',
-           markersize=5, alpha=0.4, label='Individual data points'),
+    Line2D([0], [0], color='black', marker='o', linestyle='None', markersize=5, alpha=0.4, label='Individual data points'),
     Line2D([0], [0], color='black', linestyle='-.', lw=1.5, label='Chance level')
 ]
 
@@ -86,28 +87,17 @@ for i, cond in enumerate(CONDITIONS):
     t, p = ttest_1samp(accs, CHANCE)
 
     # STD (vertical bar)
-    ax.vlines(x=i, ymin=mu - sd, ymax=mu + sd,
-              color='black', linewidth=5, alpha=0.7, zorder=3)
+    ax.vlines(x=i, ymin=mu - sd, ymax=mu + sd, color='black', linewidth=5, alpha=0.7, zorder=3)
 
     # MEAN (horizontal line)
-    ax.hlines(y=mu, xmin=i - 0.2, xmax=i + 0.2,
-              color=palette[cond], linewidth=2, zorder=4)
+    ax.hlines(y=mu, xmin=i - 0.2, xmax=i + 0.2, color=palette[cond], linewidth=2, zorder=4)
 
     # MEDIAN (white circle)
-    ax.scatter(i, md,
-               color='white', edgecolor='black',
-               s=80, zorder=5)
-
-    # significance
-    if p < 0.001: star = "***"
-    elif p < 0.01: star = "**"
-    elif p < 0.05: star = "*"
-    else: star = "n.s."
+    ax.scatter(i, md, color='white', edgecolor='black', s=80, zorder=5)
 
     y_pos = accs.max() + 5
-    ax.text(i, y_pos, f"{mu:.0f}% {star}",
-            ha="center", fontsize=12,
-            fontweight='bold', color=palette[cond])
+    star=significance_star(p)
+    ax.text(i, y_pos, f"{mu:.0f}% {star}\nvs chance", ha="center", fontsize=11, fontweight='bold', color=palette[cond])
 
 ax.legend(handles=legend_elements, loc='upper right', frameon=False, fontsize=10)
 
@@ -117,7 +107,7 @@ ax.set_xlabel("")
 ax.set_ylim(0, 105)
 
 plt.tight_layout()
-plt.savefig(os.path.join(OUTPUT_DIR, "Figure2_TimeAveragedAccuracy.pdf"), bbox_inches='tight')
+plt.savefig(os.path.join(OUTPUT_DIR, "TimeAveragedAccuracy.pdf"), bbox_inches='tight')
 plt.close()
 
 # FIGURE 2: INDIVIDUAL SENSORY VS DELAY
@@ -156,7 +146,7 @@ ax.set_ylabel("Classification accuracy (%)")
 ax.set_title("Classification accuracy per individual", fontweight='bold')
 
 plt.tight_layout()
-plt.savefig(os.path.join(OUTPUT_DIR, "Figure6_IndividualAccuracy.pdf"), bbox_inches='tight')
+plt.savefig(os.path.join(OUTPUT_DIR, "IndividualAccuracy.pdf"), bbox_inches='tight')
 plt.close()
 
 # FIGURE 3: CONFUSION MATRICES (All Subjects)
@@ -178,19 +168,82 @@ for i, cond in enumerate(CONDITIONS):
 
 plt.suptitle("Confusion matrices", fontweight='bold', y=1.05)
 plt.tight_layout()
-plt.savefig(os.path.join(OUTPUT_DIR, "Figure5_ConfusionMatrices.pdf"), bbox_inches='tight')
+plt.savefig(os.path.join(OUTPUT_DIR, "ConfusionMatrices.pdf"), bbox_inches='tight')
 plt.close()
 
 
 # Statistics printout
-print("\n===== T-TEST VS CHANCE =====")
+print("\nT-TEST VS CHANCE")
+print("\nQ1.1: EEGNet SD CLASSIFICATION ABOVE CHANCE")
+print("H0: mean classification accuracy = chance level = 33.33%")
+print("H1: mean classification accuracy > chance level")
+
+stats_rows = []
 for cond in CONDITIONS:
     accs = [results[cond][sub]["accuracy"] * 100 for sub in results[cond] if sub != "group_stats"]
-    t, p = ttest_1samp(accs, CHANCE)
+    t, p = ttest_1samp(accs, CHANCE, alternative="greater")
     
-    print(f"\n[{cond}]")
-    print(f"Mean accuracy: {np.mean(accs):.2f}%")
-    print(f"t-value: {t:.2f}")
-    print(f"p-value: {p:.4e}")
+    mean_acc = np.mean(accs)
+    sd_acc = np.std(accs, ddof=1)
+    n = len(accs)
+    sem = sd_acc / np.sqrt(n)
+    ci95 = 1.96 * sem
 
-print("\nAll figures saved successfully as PDFs (300 dpi) in the current directory.")
+    if p < 0.05:
+        conclusion = "Reject H0: accuracy is significantly above chance"
+    else:
+        conclusion = "Fail to reject H0: accuracy is not significantly above chance"
+
+    print(f"\n[{cond}]")
+    print(f"Mean accuracy: {mean_acc:.2f}% ± {ci95:.2f} CI95")
+    print(f"SD: {sd_acc:.2f}")
+    print(f"N subjects: {n}")
+    print(f"t({n-1}) = {t:.2f}")
+    print(f"p-value one-tailed: {p:.4e}")
+
+    stats_rows.append({
+        "Condition": cond,
+        "Mean accuracy (%)": mean_acc,
+        "SD": sd_acc,
+        "CI95": ci95,
+        "t": t,
+        "df": n - 1,
+        "p one-tailed": p
+    })
+
+stats_df = pd.DataFrame(stats_rows)
+
+latex_table = stats_df.to_latex(
+    index=False,
+    columns=[
+        "Condition",
+        "Mean accuracy (\%)",
+        "SD",
+        "CI95",
+        "t",
+        "df",
+        "p one-tailed"
+    ],
+    formatters={
+        "Mean accuracy (\%)": lambda x: f"{x:.3f}",
+        "SD": lambda x: f"{x:.3f}",
+        "CI95": lambda x: f"{x:.3f}",
+        "t": lambda x: f"{x:.3f}",
+        "df": lambda x: f"{int(x)}",
+        "p one-tailed": lambda x: f"{x:.6e}"
+    },
+    caption="EEGNet subject-dependent classification performance compared with chance level (33.33\\%).",
+    label="tab:q1_1_eegnet_sd",
+    escape=False
+)
+
+latex_path = os.path.join(
+    OUTPUT_DIR,
+    "Q1_1_EEGNet_SD_vs_chance_stats.tex"
+)
+
+with open(latex_path, "w") as f:
+    f.write(latex_table)
+
+print("\nSaved Q1 hypothesis test table:")
+print(latex_path)
